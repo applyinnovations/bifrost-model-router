@@ -15,17 +15,46 @@ func initTestPlugin(t *testing.T) {
 		"version":                    1,
 		"hosted_tool_fallback_model": "openai/luna",
 		"providers": map[string]any{
-			"openai": map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"},
-			"other":  map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
+			"openai":     map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"},
+			"other":      map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
+			"openrouter": map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
 		},
 		"models": map[string]any{
-			"openai/a":    map[string]any{"codex": map[string]any{}},
-			"openai/luna": map[string]any{"codex": map[string]any{}},
-			"other/b":     map[string]any{"codex": map[string]any{}},
+			"openai/a":                             map[string]any{"codex": map[string]any{}},
+			"openai/luna":                          map[string]any{"codex": map[string]any{}},
+			"other/b":                              map[string]any{"codex": map[string]any{}},
+			"openrouter/stealth/space-bunny-alpha": map[string]any{"codex": map[string]any{}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPreAuthBridgesOpenRouterWebSearchWithoutOpenAIFallback(t *testing.T) {
+	initTestPlugin(t)
+	req := &schemas.HTTPRequest{Method: "POST", Path: "/v1/responses", Headers: map[string]string{
+		"Authorization": "Bearer openai-canary",
+		"x-bf-vk":       "sk-bf-canary",
+	}, Body: []byte(`{"model":"openrouter/stealth/space-bunny-alpha","input":"hello","tools":[{"type":"web_search"}]}`)}
+	resp, err := HTTPTransportPreAuthHook(nil, req)
+	if err != nil || resp != nil {
+		t.Fatalf("resp=%v err=%v", resp, err)
+	}
+	var envelope struct {
+		Model string `json:"model"`
+		Tools []struct {
+			Type string `json:"type"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(req.Body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Model != "openrouter/stealth/space-bunny-alpha" || len(envelope.Tools) != 1 || envelope.Tools[0].Type != "openrouter:web_search" {
+		t.Fatalf("request = %#v", envelope)
+	}
+	if _, ok := req.Headers["Authorization"]; ok || req.Headers["x-bf-direct-key"] != "" {
+		t.Fatalf("OpenAI credentials were retained: %#v", req.Headers)
 	}
 }
 
@@ -176,6 +205,26 @@ func TestPreLLMSelectsPolyfill(t *testing.T) {
 	}
 	if got, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); got != schemas.ChatCompletionRequest {
 		t.Fatalf("change request type = %q", got)
+	}
+}
+
+func TestPreLLMUsesOpenRouterNativeResponsesForBridgedWebSearch(t *testing.T) {
+	initTestPlugin(t)
+	ctx := schemas.NewBifrostContext(context.Background(), time.Now().Add(time.Minute))
+	defer ctx.Cancel()
+	req := &schemas.BifrostRequest{RequestType: schemas.ResponsesStreamRequest, ResponsesRequest: &schemas.BifrostResponsesRequest{
+		Provider: schemas.OpenRouter,
+		Model:    "stealth/space-bunny-alpha",
+		Params: &schemas.ResponsesParameters{Tools: []schemas.ResponsesTool{{
+			Type: schemas.ResponsesToolType("openrouter:web_search"),
+		}}},
+	}}
+	_, short, err := PreLLMHook(ctx, req)
+	if err != nil || short != nil {
+		t.Fatalf("short=%v err=%v", short, err)
+	}
+	if changed, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); changed != "" {
+		t.Fatalf("request was converted to %q", changed)
 	}
 }
 

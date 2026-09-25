@@ -14,6 +14,12 @@ The initial polyfill rejects features that cannot be represented safely:
   interpreter;
 - non-function tool types and image/file/audio content on text-only adapters.
 
+For OpenRouter, a parameter-free top-level `web_search` offer is translated to
+its `openrouter:web_search` server tool and sent through OpenRouter's native
+Responses API. The model can decline the tool without moving the turn to
+OpenAI. Parameterized, nested, and unsupported hosted tools keep the
+whole-request OpenAI fallback so their semantics are not silently discarded.
+
 Adapters are selected by configuration, not provider name. `openai-chat`
 validates the common Chat-compatible subset. `strict-text-only` makes modality
 loss explicit. `single-system-message` hoists every textual system/developer

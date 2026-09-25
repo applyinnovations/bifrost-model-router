@@ -221,14 +221,17 @@ When any configured model uses `chat_polyfill`, verify that the effective
 `plugins[].config.hosted_tool_fallback_model` is a native Responses model on
 the `openai` request-passthrough provider. If omitted, the router defaults to
 `openai/gpt-6-luna` when that slug resolves. Set an explicit available OpenAI
-model if it does not. This sends the whole request through Codex's OpenAI login
-if Codex includes a hosted tool such as `web_search`; the managed provider
-cannot execute that tool through Chat Completions. Explain that this one
-request uses the fallback model and may consume OpenAI plan quota. Verify
-routing without spending provider quota by sending a managed-model
-`web_search` request with the installed virtual key but no OpenAI bearer token;
-the expected result is `missing_openai_auth`, not `hosted_tool_unsupported`.
-Do not strip hosted tools to keep a request on a polyfilled model.
+model if it does not. Hosted tools without a compatible managed-provider path
+send the whole request through Codex's OpenAI login and may consume OpenAI plan
+quota. OpenRouter is the narrow exception: a parameter-free top-level
+`web_search` offer is translated to `openrouter:web_search` and sent through
+OpenRouter's native Responses API, where its server tool can execute the search
+or remain unused. Parameterized, nested, and other hosted tools keep the OpenAI
+fallback. Verify fallback routing without spending provider quota by sending an
+unsupported hosted tool with the installed virtual key but no OpenAI bearer
+token; the expected result is `missing_openai_auth`, not
+`hosted_tool_unsupported`. Do not strip hosted tools to keep a request on a
+polyfilled model.
 
 ## Apply the setup
 

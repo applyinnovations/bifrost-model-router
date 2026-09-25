@@ -199,15 +199,30 @@ Sign in through Codex Desktop, or run `codex login` if you use the CLI. Then
 fully restart Codex and create a new thread. The router does not store an
 OpenAI credential.
 
-### `web_search` is unavailable through a Chat Completions polyfill
+### Hosted tools on a Chat Completions polyfill
 
-The selected managed model uses a Chat Completions adapter, which cannot run
-Codex's hosted search tool. The router defaults missing
+OpenRouter models use its native Responses API when Codex offers a plain
+`web_search` tool. The router translates that offer to OpenRouter's server-side
+search tool, so OpenRouter's model decides whether the turn needs a search. A
+text-only turn stays on the selected OpenRouter model, while a search turn is
+executed and completed by OpenRouter.
+
+Other managed providers and hosted tools that cannot be represented safely
+still use a whole-request OpenAI fallback. The router defaults missing
 `plugins[].config.hosted_tool_fallback_model` to `openai/gpt-6-luna` when the
 OpenAI request-passthrough provider can resolve it. An explicit value overrides
 the default. Pull the current image and rerun setup to apply this to an existing
-local configuration. The whole search request uses the fallback OpenAI model.
-Restart Codex and create a new task after the router is updated.
+local configuration. Restart Codex and create a new task after the router is
+updated.
+
+### OpenAI usage limit while a managed model is selected
+
+When a hosted tool has no compatible managed-provider execution path, the
+router sends the whole request to the configured OpenAI fallback model. That
+request uses the Codex login and its OpenAI usage allowance, even though a
+managed model was selected. The routing log records the requested model,
+effective provider, and fallback reason without recording prompt text or
+credentials.
 
 ### HTTP 401
 

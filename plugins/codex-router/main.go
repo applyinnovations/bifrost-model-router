@@ -48,7 +48,7 @@ func HTTPTransportPreAuthHook(_ *schemas.BifrostContext, req *schemas.HTTPReques
 	}
 	cfg := currentConfig()
 	if isResponsesRequest(req) {
-		routedBody, _, err := responsescompat.ApplyHostedToolFallback(req.Body, cfg)
+		routedBody, _, err := responsescompat.ApplyHostedToolRouting(req.Body, cfg)
 		if err != nil {
 			return errorResponse(400, "invalid_request", "request body must be valid JSON"), nil
 		}
@@ -127,6 +127,9 @@ func PreLLMHook(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) (*sche
 	case config.ResponsesNative:
 		return req, nil, nil
 	case config.ResponsesChatPolyfill:
+		if resolved.Model.Provider == "openrouter" && responsescompat.UsesOpenRouterNativeWebSearch(req.ResponsesRequest) {
+			return req, nil, nil
+		}
 		adapter, ok := responsescompat.Get(resolved.Model.Adapter)
 		if !ok {
 			return req, shortCircuit(500, "invalid_router_config", "configured Responses adapter is not registered"), nil

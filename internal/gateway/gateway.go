@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -75,7 +76,12 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
 		return
 	}
-	routed, _, err := responsescompat.ApplyHostedToolFallback(body, h.cfg)
+	requested, err := h.resolveRequestModel(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
+		return
+	}
+	routed, decision, err := responsescompat.ApplyHostedToolRouting(body, h.cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
 		return
@@ -85,6 +91,11 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
 		return
 	}
+	reason := "none"
+	if decision != nil {
+		reason = decision.Reason
+	}
+	log.Printf("responses_route requested_model=%q effective_provider=%q fallback_reason=%q", requested.Slug, resolved.Model.Provider, reason)
 	if resolved.Provider.CredentialMode == config.CredentialRequestPassthrough {
 		routed, err = rewriteModel(routed, resolved.UpstreamModel)
 		if err != nil {
