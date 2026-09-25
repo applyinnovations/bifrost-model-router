@@ -26,14 +26,14 @@
     "config": {
       "version": 1,
       "instructions_template": "You are a coding agent.",
-      "image_generation_model": "openai/gpt-5.6-luna",
+      "image_generation_model": "openai/gpt-6-luna",
       "providers": {
         "openai": { "credential_mode": "request_passthrough", "responses_mode": "native", "discover_models": true },
         "managed": { "credential_mode": "bifrost", "responses_mode": "chat_polyfill", "adapter": "single-system-message", "discover_models": true, "codex_defaults": { "context_window": 131072, "input_modalities": ["text"] } }
       },
       "models": {
         "openai/gpt-example": { "aliases": ["gpt-example"], "codex": { "context_window": 128000 } },
-        "openai/gpt-5.6-luna": { "aliases": ["gpt-5.6-luna"], "codex": { "context_window": 272000 } },
+        "openai/gpt-6-luna": { "aliases": ["gpt-6-luna"], "codex": { "context_window": 272000 } },
         "managed/example-model": { "aliases": ["example-model"], "codex": { "context_window": 131072 } }
       }
     }
