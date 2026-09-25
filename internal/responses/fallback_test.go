@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,18 +17,39 @@ func fallbackTestConfig(t *testing.T) config.Config {
 		Providers: map[string]config.ProviderProfile{
 			"openai":     {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative},
 			"managed":    {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill},
-			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill},
+			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "openrouter:web_search"}},
+			"custom":     {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "web_search"}},
 		},
 		Models: map[string]config.ModelProfile{
 			"openai/luna":                          {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
 			"managed/text-model":                   {Codex: config.CodexProfile{}},
 			"openrouter/stealth/space-bunny-alpha": {Codex: config.CodexProfile{}},
+			"custom/search-model":                  {Codex: config.CodexProfile{}},
 		},
 	}
 	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestApplyHostedToolRoutingSupportsCustomProviderNativeTool(t *testing.T) {
+	body := []byte(`{"model":"custom/search-model","tools":[{"type":"web_search","search_context_size":"high"}]}`)
+	routed, decision, err := ApplyHostedToolRouting(body, fallbackTestConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision == nil || decision.EffectiveProvider != "custom" || decision.FallbackModel != "" || decision.Reason != "provider_native_hosted_tool:web_search" {
+		t.Fatalf("decision = %#v", decision)
+	}
+	if string(routed) != string(body) {
+		var got, want any
+		_ = json.Unmarshal(routed, &got)
+		_ = json.Unmarshal(body, &want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("routed request = %s", routed)
+		}
+	}
 }
 
 func TestApplyHostedToolFallbackBridgesPlainOpenRouterWebSearch(t *testing.T) {
@@ -40,7 +62,7 @@ func TestApplyHostedToolFallbackBridgesPlainOpenRouterWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision == nil || decision.FallbackModel != "" || decision.EffectiveProvider != "openrouter" || decision.Reason != "openrouter_native_web_search" {
+	if decision == nil || decision.FallbackModel != "" || decision.EffectiveProvider != "openrouter" || decision.Reason != "provider_native_hosted_tool:web_search" {
 		t.Fatalf("decision = %#v", decision)
 	}
 	var got struct {

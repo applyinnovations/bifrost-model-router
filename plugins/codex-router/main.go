@@ -127,7 +127,7 @@ func PreLLMHook(ctx *schemas.BifrostContext, req *schemas.BifrostRequest) (*sche
 	case config.ResponsesNative:
 		return req, nil, nil
 	case config.ResponsesChatPolyfill:
-		if resolved.Model.Provider == "openrouter" && responsescompat.UsesOpenRouterNativeWebSearch(req.ResponsesRequest) {
+		if responsescompat.UsesNativeHostedTools(req.ResponsesRequest, resolved.Provider.NativeHostedTools) {
 			return req, nil, nil
 		}
 		adapter, ok := responsescompat.Get(resolved.Model.Adapter)

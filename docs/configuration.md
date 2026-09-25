@@ -16,6 +16,10 @@ Provider fields:
 - `responses_mode`: `native`, `chat_polyfill`, or `unsupported`.
 - `adapter`: `native`, `openai-chat`, `single-system-message`, or
   `strict-text-only`.
+- `native_hosted_tools`: optional mapping from a Codex hosted-tool type to the
+  type accepted by this provider's native Responses endpoint. This lets any
+  built-in or custom provider bypass `chat_polyfill` only for requests whose
+  hosted tools all have a verified native execution path.
 - `discover_models`: accept and publish models returned by that provider's
   authenticated model catalog without requiring per-model configuration.
 - `model_name_overrides`: optional exact upstream-model-ID to display-name
@@ -104,6 +108,26 @@ Chat Completions-polyfilled model is requested with an OpenAI-hosted/server-side
 tool, the transport rewrites the whole request to the fallback before credential
 selection. The fallback uses the caller's forwarded OpenAI token; the router
 never stores an OpenAI key.
+
+A `chat_polyfill` provider can opt into native Responses for specific hosted
+tools without changing its normal text path. A standard OpenAI-compatible
+provider that accepts `web_search` unchanged uses:
+
+```yaml
+native_hosted_tools:
+  web_search: web_search
+```
+
+A provider with its own server-tool spelling maps to that spelling instead:
+
+```yaml
+native_hosted_tools:
+  web_search: openrouter:web_search
+```
+
+Renamed tools are accepted only when the offered tool has no extra parameters;
+unchanged standard tool types retain their parameters. If any offered hosted
+tool lacks a mapping, the complete request uses the OpenAI fallback.
 
 `namespace` is not considered hosted. Bifrost flattens namespace members into
 ordinary function tools for providers without native namespace support and

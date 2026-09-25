@@ -49,6 +49,41 @@ models:
 	}
 }
 
+func TestProviderNativeHostedToolsSupportCustomProviders(t *testing.T) {
+	cfg, err := Decode(strings.NewReader(`
+version: 1
+providers:
+  custom-responses:
+    credential_mode: bifrost
+    responses_mode: chat_polyfill
+    native_hosted_tools: {web_search: web_search}
+models:
+  custom-responses/search-model: {codex: {}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Providers["custom-responses"].NativeHostedTools["web_search"]; got != "web_search" {
+		t.Fatalf("native hosted tool mapping = %q", got)
+	}
+}
+
+func TestProviderNativeHostedToolsRejectBlankMappings(t *testing.T) {
+	_, err := Decode(strings.NewReader(`
+version: 1
+providers:
+  custom:
+    credential_mode: bifrost
+    responses_mode: chat_polyfill
+    native_hosted_tools: {web_search: " "}
+models:
+  custom/model: {codex: {}}
+`))
+	if err == nil || !strings.Contains(err.Error(), "native_hosted_tools") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestExplicitHostedToolFallbackTakesPrecedence(t *testing.T) {
 	cfg, err := Decode(strings.NewReader(`
 version: 1

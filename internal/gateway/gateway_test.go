@@ -21,13 +21,15 @@ func testConfig(t *testing.T) config.Config {
 		Providers: map[string]config.ProviderProfile{
 			"openai":     {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
 			"managed":    {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
-			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
+			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "openrouter:web_search"}, DiscoverModels: true},
+			"custom":     {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "web_search"}, DiscoverModels: true},
 		},
 		Models: map[string]config.ModelProfile{
 			"openai/sol":                           {Aliases: []string{"sol"}, Codex: config.CodexProfile{ContextWindow: 272000, MaxContextWindow: 872000}, ContextVariants: []config.ContextVariant{{ContextWindow: 872000}}},
 			"openai/luna":                          {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
 			"managed/text-model":                   {Aliases: []string{"text-model"}, Codex: config.CodexProfile{}},
 			"openrouter/stealth/space-bunny-alpha": {Codex: config.CodexProfile{}},
+			"custom/search-model":                  {Codex: config.CodexProfile{}},
 		},
 	}
 	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
@@ -53,6 +55,7 @@ func TestResponsesDispatch(t *testing.T) {
 		{"hosted image tool fallback", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, chatGPTResponsesPath, "luna", "image_generation"},
 		{"unsupported hosted tool fallback", `{"model":"openrouter/stealth/space-bunny-alpha","input":"hi","tools":[{"type":"file_search"}]}`, chatGPTResponsesPath, "luna", "file_search"},
 		{"OpenRouter native web search bridge", `{"model":"openrouter/stealth/space-bunny-alpha","input":"what model are you?","tools":[{"type":"web_search"}]}`, "/v1/responses", "openrouter/stealth/space-bunny-alpha", "openrouter:web_search"},
+		{"custom provider native web search", `{"model":"custom/search-model","input":"latest news","tools":[{"type":"web_search","search_context_size":"high"}]}`, "/v1/responses", "custom/search-model", "web_search"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -136,7 +139,7 @@ func TestOpenRouterWebSearchResultAndRoutingLogPassThrough(t *testing.T) {
 	for _, want := range []string{
 		`requested_model="openrouter/stealth/space-bunny-alpha"`,
 		`effective_provider="openrouter"`,
-		`fallback_reason="openrouter_native_web_search"`,
+		`fallback_reason="provider_native_hosted_tool:web_search"`,
 	} {
 		if !strings.Contains(logText, want) {
 			t.Errorf("routing log %q does not contain %q", logText, want)

@@ -223,15 +223,17 @@ the `openai` request-passthrough provider. If omitted, the router defaults to
 `openai/gpt-6-luna` when that slug resolves. Set an explicit available OpenAI
 model if it does not. Hosted tools without a compatible managed-provider path
 send the whole request through Codex's OpenAI login and may consume OpenAI plan
-quota. OpenRouter is the narrow exception: a parameter-free top-level
-`web_search` offer is translated to `openrouter:web_search` and sent through
-OpenRouter's native Responses API, where its server tool can execute the search
-or remain unused. Parameterized, nested, and other hosted tools keep the OpenAI
-fallback. Verify fallback routing without spending provider quota by sending an
-unsupported hosted tool with the installed virtual key but no OpenAI bearer
-token; the expected result is `missing_openai_auth`, not
-`hosted_tool_unsupported`. Do not strip hosted tools to keep a request on a
-polyfilled model.
+quota. When official documentation and an account-aware test verify a native
+Responses execution path, configure the provider's `native_hosted_tools`
+mapping from Codex's offered type to the upstream type. This works for built-in
+and custom providers. OpenRouter, for example, maps a parameter-free top-level
+`web_search` to `openrouter:web_search`; a standard compatible endpoint can map
+`web_search` to itself and retain its parameters. Nested, unmapped, and
+unrepresentable hosted tools keep the OpenAI fallback. Verify fallback routing
+without spending provider quota by sending an unsupported hosted tool with the
+installed virtual key but no OpenAI bearer token; the expected result is
+`missing_openai_auth`, not `hosted_tool_unsupported`. Do not strip hosted tools
+to keep a request on a polyfilled model.
 
 ## Apply the setup
 

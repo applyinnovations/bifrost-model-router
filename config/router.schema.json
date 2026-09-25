@@ -23,6 +23,11 @@
         "credential_mode": { "enum": ["bifrost", "request_passthrough"] },
         "responses_mode": { "$ref": "#/$defs/responsesMode" },
         "adapter": { "$ref": "#/$defs/adapter" },
+        "native_hosted_tools": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
         "discover_models": { "type": "boolean" },
 		"model_name_overrides": {
 		  "type": "object",

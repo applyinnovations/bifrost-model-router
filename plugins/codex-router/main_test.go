@@ -17,13 +17,15 @@ func initTestPlugin(t *testing.T) {
 		"providers": map[string]any{
 			"openai":     map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"},
 			"other":      map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
-			"openrouter": map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
+			"openrouter": map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "native_hosted_tools": map[string]any{"web_search": "openrouter:web_search"}, "discover_models": true},
+			"custom":     map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "native_hosted_tools": map[string]any{"web_search": "web_search"}, "discover_models": true},
 		},
 		"models": map[string]any{
 			"openai/a":                             map[string]any{"codex": map[string]any{}},
 			"openai/luna":                          map[string]any{"codex": map[string]any{}},
 			"other/b":                              map[string]any{"codex": map[string]any{}},
 			"openrouter/stealth/space-bunny-alpha": map[string]any{"codex": map[string]any{}},
+			"custom/search-model":                  map[string]any{"codex": map[string]any{}},
 		},
 	})
 	if err != nil {
@@ -208,15 +210,15 @@ func TestPreLLMSelectsPolyfill(t *testing.T) {
 	}
 }
 
-func TestPreLLMUsesOpenRouterNativeResponsesForBridgedWebSearch(t *testing.T) {
+func TestPreLLMUsesProviderNativeResponsesForConfiguredHostedTool(t *testing.T) {
 	initTestPlugin(t)
 	ctx := schemas.NewBifrostContext(context.Background(), time.Now().Add(time.Minute))
 	defer ctx.Cancel()
 	req := &schemas.BifrostRequest{RequestType: schemas.ResponsesStreamRequest, ResponsesRequest: &schemas.BifrostResponsesRequest{
-		Provider: schemas.OpenRouter,
-		Model:    "stealth/space-bunny-alpha",
+		Provider: "custom",
+		Model:    "search-model",
 		Params: &schemas.ResponsesParameters{Tools: []schemas.ResponsesTool{{
-			Type: schemas.ResponsesToolType("openrouter:web_search"),
+			Type: schemas.ResponsesToolTypeWebSearch,
 		}}},
 	}}
 	_, short, err := PreLLMHook(ctx, req)

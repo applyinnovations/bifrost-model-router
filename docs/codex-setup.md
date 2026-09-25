@@ -201,13 +201,14 @@ OpenAI credential.
 
 ### Hosted tools on a Chat Completions polyfill
 
-OpenRouter models use its native Responses API when Codex offers a plain
-`web_search` tool. The router translates that offer to OpenRouter's server-side
-search tool, so OpenRouter's model decides whether the turn needs a search. A
-text-only turn stays on the selected OpenRouter model, while a search turn is
-executed and completed by OpenRouter.
+Any built-in or custom provider can declare a `native_hosted_tools` mapping for
+tools verified on its native Responses endpoint. When Codex offers only mapped
+hosted tools, the router keeps the selected provider and lets that endpoint
+decide whether to execute them. For OpenRouter, `web_search` maps to
+`openrouter:web_search`; a text-only turn stays on the selected model, while a
+search turn is executed and completed by OpenRouter.
 
-Other managed providers and hosted tools that cannot be represented safely
+Providers without a declared path, and tools that cannot be represented safely,
 still use a whole-request OpenAI fallback. The router defaults missing
 `plugins[].config.hosted_tool_fallback_model` to `openai/gpt-6-luna` when the
 OpenAI request-passthrough provider can resolve it. An explicit value overrides

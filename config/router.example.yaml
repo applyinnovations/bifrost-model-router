@@ -16,6 +16,8 @@ providers:
     responses_mode: chat_polyfill
     adapter: single-system-message
     discover_models: true
+    # Enable only for tool types verified on this provider's native Responses endpoint.
+    # native_hosted_tools: { web_search: web_search }
     codex_defaults:
       context_window: 131072
       input_modalities: [text]

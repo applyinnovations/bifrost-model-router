@@ -27,10 +27,9 @@ type rawTool struct {
 }
 
 // ApplyHostedToolRouting routes hosted tools offered to Chat Completions
-// polyfills. OpenRouter can execute a plain web_search through its native
-// Responses API, where the model still decides whether to search. Other hosted
-// tools retain the whole-request fallback because silently removing them would
-// change the request's semantics.
+// polyfills. A provider can declare hosted-tool types that it executes through
+// its native Responses API. Other hosted tools retain the whole-request
+// fallback because silently removing them would change the request's semantics.
 func ApplyHostedToolRouting(body []byte, cfg config.Config) ([]byte, *HostedToolRoute, error) {
 	var envelope struct {
 		Model string    `json:"model"`
@@ -48,15 +47,15 @@ func ApplyHostedToolRouting(body []byte, cfg config.Config) ([]byte, *HostedTool
 	if len(types) == 0 {
 		return body, nil, nil
 	}
-	if requested.Model.Provider == "openrouter" && canBridgeOpenRouterWebSearch(body, envelope.Tools) {
-		routed, err := rewriteOpenRouterWebSearch(body)
+	if canUseNativeHostedTools(body, envelope.Tools, requested.Provider.NativeHostedTools) {
+		routed, err := rewriteNativeHostedTools(body, requested.Provider.NativeHostedTools)
 		if err != nil {
 			return body, nil, err
 		}
 		return routed, &HostedToolRoute{
 			OriginalModel:     envelope.Model,
-			EffectiveProvider: "openrouter",
-			Reason:            "openrouter_native_web_search",
+			EffectiveProvider: requested.Model.Provider,
+			Reason:            "provider_native_hosted_tool:" + strings.Join(types, ","),
 			ToolTypes:         types,
 		}, nil
 	}
@@ -86,13 +85,12 @@ func ApplyHostedToolRouting(body []byte, cfg config.Config) ([]byte, *HostedTool
 	}, nil
 }
 
-// canBridgeOpenRouterWebSearch deliberately accepts only the parameter-free,
-// top-level web_search shape Codex currently offers. OpenRouter's equivalent is
-// an openrouter:web_search server tool. Other OpenAI web-search options do not
-// have a lossless representation in Bifrost's neutral OpenRouter tool type, so
-// those requests must use the existing OpenAI fallback.
-func canBridgeOpenRouterWebSearch(body []byte, tools []rawTool) bool {
-	if len(tools) == 0 {
+// canUseNativeHostedTools requires every hosted tool to have a provider-declared
+// mapping. A renamed tool must be parameter-free because Bifrost cannot
+// losslessly move provider-specific parameters between different tool schemas.
+// An unchanged standard Responses tool keeps its parameters intact.
+func canUseNativeHostedTools(body []byte, tools []rawTool, routes map[string]string) bool {
+	if len(tools) == 0 || len(routes) == 0 {
 		return false
 	}
 	var envelope struct {
@@ -103,7 +101,8 @@ func canBridgeOpenRouterWebSearch(body []byte, tools []rawTool) bool {
 	}
 	for i, tool := range tools {
 		if isHostedToolType(tool.Type) {
-			if strings.TrimSpace(tool.Type) != "web_search" || len(tool.Tools) != 0 || len(envelope.Tools[i]) != 1 {
+			upstreamType, ok := routes[tool.Type]
+			if !ok || len(tool.Tools) != 0 || (upstreamType != tool.Type && len(envelope.Tools[i]) != 1) {
 				return false
 			}
 		}
@@ -114,7 +113,7 @@ func canBridgeOpenRouterWebSearch(body []byte, tools []rawTool) bool {
 	return true
 }
 
-func rewriteOpenRouterWebSearch(body []byte) ([]byte, error) {
+func rewriteNativeHostedTools(body []byte, routes map[string]string) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return nil, err
@@ -128,8 +127,8 @@ func rewriteOpenRouterWebSearch(body []byte) ([]byte, error) {
 		if err := json.Unmarshal(tool["type"], &toolType); err != nil {
 			return nil, err
 		}
-		if toolType == "web_search" {
-			encoded, err := json.Marshal("openrouter:web_search")
+		if upstreamType, ok := routes[toolType]; ok {
+			encoded, err := json.Marshal(upstreamType)
 			if err != nil {
 				return nil, err
 			}
@@ -144,19 +143,36 @@ func rewriteOpenRouterWebSearch(body []byte) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// UsesOpenRouterNativeWebSearch reports whether a request was bridged to
-// OpenRouter's server-side search tool and therefore must stay on the native
+// UsesNativeHostedTools reports whether a parsed request contains a complete
+// provider-declared hosted-tool route and therefore must stay on the native
 // Responses wire instead of being converted to Chat Completions.
-func UsesOpenRouterNativeWebSearch(req *schemas.BifrostResponsesRequest) bool {
-	if req == nil || req.Provider != schemas.OpenRouter || req.Params == nil {
+func UsesNativeHostedTools(req *schemas.BifrostResponsesRequest, routes map[string]string) bool {
+	if req == nil || req.Params == nil || len(routes) == 0 {
 		return false
 	}
-	for _, tool := range req.Params.Tools {
-		if tool.Type == schemas.ResponsesToolType("openrouter:web_search") {
-			return true
-		}
+	targets := make(map[schemas.ResponsesToolType]bool, len(routes))
+	for _, target := range routes {
+		targets[schemas.ResponsesToolType(target)] = true
 	}
-	return false
+	found := false
+	var visit func([]schemas.ResponsesTool, bool) bool
+	visit = func(tools []schemas.ResponsesTool, nested bool) bool {
+		for _, tool := range tools {
+			if targets[tool.Type] {
+				if nested {
+					return false
+				}
+				found = true
+			} else if isHostedToolType(string(tool.Type)) {
+				return false
+			}
+			if tool.ResponsesToolNamespace != nil && !visit(tool.ResponsesToolNamespace.Tools, true) {
+				return false
+			}
+		}
+		return true
+	}
+	return visit(req.Params.Tools, false) && found
 }
 
 func hostedToolTypes(tools []rawTool) []string {

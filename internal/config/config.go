@@ -46,6 +46,7 @@ type ProviderProfile struct {
 	CredentialMode     CredentialMode    `json:"credential_mode" yaml:"credential_mode"`
 	ResponsesMode      ResponsesMode     `json:"responses_mode" yaml:"responses_mode"`
 	Adapter            string            `json:"adapter,omitempty" yaml:"adapter,omitempty"`
+	NativeHostedTools  map[string]string `json:"native_hosted_tools,omitempty" yaml:"native_hosted_tools,omitempty"`
 	DiscoverModels     bool              `json:"discover_models,omitempty" yaml:"discover_models,omitempty"`
 	ModelNameOverrides map[string]string `json:"model_name_overrides,omitempty" yaml:"model_name_overrides,omitempty"`
 	CodexDefaults      CodexProfile      `json:"codex_defaults,omitempty" yaml:"codex_defaults,omitempty"`
@@ -281,6 +282,11 @@ func validateProvider(name string, p ProviderProfile) error {
 	}
 	if !validAdapter(p.Adapter) {
 		return fmt.Errorf("provider %q has unknown adapter %q", name, p.Adapter)
+	}
+	for offeredType, upstreamType := range p.NativeHostedTools {
+		if strings.TrimSpace(offeredType) == "" || strings.TrimSpace(upstreamType) == "" {
+			return fmt.Errorf("provider %q native_hosted_tools must map non-empty tool types", name)
+		}
 	}
 	for model, displayName := range p.ModelNameOverrides {
 		if strings.TrimSpace(model) == "" || strings.TrimSpace(displayName) == "" {
