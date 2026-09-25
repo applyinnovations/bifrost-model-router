@@ -46,6 +46,9 @@ the agent-managed flow, verification, troubleshooting, and cleanup.
 - Hosted tools on polyfilled models reroute the whole request to an OpenAI
   Responses model. The fallback defaults to `openai/gpt-6-luna` when available
   through the configured OpenAI passthrough; it can be overridden.
+- The Codex Images API generation path uses that native OpenAI Responses model
+  and its hosted `image_generation` tool. The gateway adapts the result to the
+  Images API response shape, so Codex login auth works without an API key.
 - Account-aware provider catalogs are discovered dynamically. New upstream
   models flow through without editing a static router model list. An optional
   virtual-key allowlist can deliberately limit what a user sees: `"*"` admits
