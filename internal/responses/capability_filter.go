@@ -32,12 +32,12 @@ func FilterUnsupportedHostedTools(body []byte, cfg config.Config) ([]byte, *Host
 		return body, nil, nil, err
 	}
 	resolved, ok := cfg.ResolveModel(envelope.Model)
-	if !ok || resolved.Model.ResponsesMode != config.ResponsesChatPolyfill {
+	if !ok {
 		return body, nil, nil, nil
 	}
 
 	removed := make(map[string]bool)
-	filtered := filterToolList(envelope.Tools, removed)
+	filtered := filterToolList(envelope.Tools, removed, resolved)
 	if len(removed) == 0 {
 		return body, nil, nil, nil
 	}
@@ -80,7 +80,7 @@ func FilterUnsupportedHostedTools(body []byte, cfg config.Config) ([]byte, *Host
 	return filteredBody, decision, nil, nil
 }
 
-func filterToolList(tools []any, removed map[string]bool) []any {
+func filterToolList(tools []any, removed map[string]bool, resolved config.ResolvedModel) []any {
 	filtered := make([]any, 0, len(tools))
 	for _, value := range tools {
 		tool, ok := value.(map[string]any)
@@ -89,13 +89,13 @@ func filterToolList(tools []any, removed map[string]bool) []any {
 			continue
 		}
 		toolType, _ := tool["type"].(string)
-		if isHostedToolType(toolType) {
+		if shouldFilterHostedTool(toolType, resolved) {
 			removed[toolType] = true
 			continue
 		}
 		if nested, ok := tool["tools"].([]any); ok {
 			copy := cloneMap(tool)
-			copy["tools"] = filterToolList(nested, removed)
+			copy["tools"] = filterToolList(nested, removed, resolved)
 			if len(copy["tools"].([]any)) == 0 {
 				continue
 			}
@@ -104,6 +104,17 @@ func filterToolList(tools []any, removed map[string]bool) []any {
 		filtered = append(filtered, tool)
 	}
 	return filtered
+}
+
+func shouldFilterHostedTool(toolType string, resolved config.ResolvedModel) bool {
+	if !isHostedToolType(toolType) {
+		return false
+	}
+	if resolved.Model.ResponsesMode == config.ResponsesChatPolyfill {
+		return true
+	}
+	normalized := strings.ToLower(strings.TrimSpace(toolType))
+	return strings.HasPrefix(normalized, "web_search") && !resolved.Model.Codex.SupportsSearch
 }
 
 func cloneMap(input map[string]any) map[string]any {

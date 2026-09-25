@@ -19,13 +19,15 @@ func testConfig(t *testing.T) config.Config {
 		Version:              1,
 		ImageGenerationModel: "openai/luna",
 		Providers: map[string]config.ProviderProfile{
-			"openai":  {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
-			"managed": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
+			"openai":     {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
+			"managed":    {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
+			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
 		},
 		Models: map[string]config.ModelProfile{
-			"openai/sol":         {Aliases: []string{"sol"}, Codex: config.CodexProfile{ContextWindow: 272000, MaxContextWindow: 872000}, ContextVariants: []config.ContextVariant{{ContextWindow: 872000}}},
-			"openai/luna":        {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
-			"managed/text-model": {Aliases: []string{"text-model"}, Codex: config.CodexProfile{}},
+			"openai/sol":                           {Aliases: []string{"sol"}, Codex: config.CodexProfile{ContextWindow: 272000, MaxContextWindow: 872000}, ContextVariants: []config.ContextVariant{{ContextWindow: 872000}}},
+			"openai/luna":                          {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
+			"managed/text-model":                   {Aliases: []string{"text-model"}, Codex: config.CodexProfile{}},
+			"openrouter/stealth/space-bunny-alpha": {Codex: config.CodexProfile{}},
 		},
 	}
 	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
@@ -47,6 +49,7 @@ func TestResponsesDispatch(t *testing.T) {
 		{"managed provider", `{"model":"managed/text-model","input":"hi"}`, "/v1/responses", "managed/text-model", ""},
 		{"new managed model", `{"model":"managed/new-model","input":"hi"}`, "/v1/responses", "managed/new-model", ""},
 		{"new OpenAI model", `{"model":"new-openai-model","input":"hi"}`, chatGPTResponsesPath, "new-openai-model", ""},
+		{"native OpenRouter without search capability", `{"model":"openrouter/stealth/space-bunny-alpha","input":"hi","tools":[{"type":"web_search"}]}`, "/v1/responses", "openrouter/stealth/space-bunny-alpha", "web_search"},
 		{"optional web search filtered", `{"model":"managed/text-model","input":"hi","tools":[{"type":"web_search"}]}`, "/v1/responses", "managed/text-model", "web_search"},
 		{"optional image tool filtered", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, "/v1/responses", "managed/text-model", "image_generation"},
 	}

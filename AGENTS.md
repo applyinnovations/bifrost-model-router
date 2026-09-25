@@ -223,7 +223,9 @@ The selected model and provider must not change. Explicit hosted-tool choices
 fail with `hosted_tool_unsupported`; `tool_choice: required` also fails when no
 supported tools remain. Verify that filtered requests identify unavailable
 tools to the model, advertise `supports_search_tool: false`, and emit only
-privacy-safe capability logs. Native Responses models retain hosted tools.
+privacy-safe capability logs. Native Responses models retain hosted tools only
+when the resolved model capability supports them; native wire support alone
+does not establish hosted-tool support for every model.
 
 ## Apply the setup
 
