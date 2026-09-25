@@ -217,23 +217,13 @@ native Responses and model listing when unsupported, and select a router
 Keep the exact `openai` router provider reserved for Codex request passthrough.
 Never forward the Codex OpenAI bearer to a managed provider.
 
-When any configured model uses `chat_polyfill`, verify that the effective
-`plugins[].config.hosted_tool_fallback_model` is a native Responses model on
-the `openai` request-passthrough provider. If omitted, the router defaults to
-`openai/gpt-6-luna` when that slug resolves. Set an explicit available OpenAI
-model if it does not. Hosted tools without a compatible managed-provider path
-send the whole request through Codex's OpenAI login and may consume OpenAI plan
-quota. When official documentation and an account-aware test verify a native
-Responses execution path, configure the provider's `native_hosted_tools`
-mapping from Codex's offered type to the upstream type. This works for built-in
-and custom providers. OpenRouter, for example, maps a parameter-free top-level
-`web_search` to `openrouter:web_search`; a standard compatible endpoint can map
-`web_search` to itself and retain its parameters. Nested, unmapped, and
-unrepresentable hosted tools keep the OpenAI fallback. Verify fallback routing
-without spending provider quota by sending an unsupported hosted tool with the
-installed virtual key but no OpenAI bearer token; the expected result is
-`missing_openai_auth`, not `hosted_tool_unsupported`. Do not strip hosted tools
-to keep a request on a polyfilled model.
+For `chat_polyfill` models, optional hosted tools offered by Codex are removed
+before conversion while ordinary function and namespace tools are retained.
+The selected model and provider must not change. Explicit hosted-tool choices
+fail with `hosted_tool_unsupported`; `tool_choice: required` also fails when no
+supported tools remain. Verify that filtered requests identify unavailable
+tools to the model, advertise `supports_search_tool: false`, and emit only
+privacy-safe capability logs. Native Responses models retain hosted tools.
 
 ## Apply the setup
 

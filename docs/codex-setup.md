@@ -199,31 +199,16 @@ Sign in through Codex Desktop, or run `codex login` if you use the CLI. Then
 fully restart Codex and create a new thread. The router does not store an
 OpenAI credential.
 
-### Hosted tools on a Chat Completions polyfill
+### `web_search` is unavailable through a Chat Completions polyfill
 
-Any built-in or custom provider can declare a `native_hosted_tools` mapping for
-tools verified on its native Responses endpoint. When Codex offers only mapped
-hosted tools, the router keeps the selected provider and lets that endpoint
-decide whether to execute them. For OpenRouter, `web_search` maps to
-`openrouter:web_search`; a text-only turn stays on the selected model, while a
-search turn is executed and completed by OpenRouter.
-
-Providers without a declared path, and tools that cannot be represented safely,
-still use a whole-request OpenAI fallback. The router defaults missing
-`plugins[].config.hosted_tool_fallback_model` to `openai/gpt-6-luna` when the
-OpenAI request-passthrough provider can resolve it. An explicit value overrides
-the default. Pull the current image and rerun setup to apply this to an existing
-local configuration. Restart Codex and create a new task after the router is
-updated.
-
-### OpenAI usage limit while a managed model is selected
-
-When a hosted tool has no compatible managed-provider execution path, the
-router sends the whole request to the configured OpenAI fallback model. That
-request uses the Codex login and its OpenAI usage allowance, even though a
-managed model was selected. The routing log records the requested model,
-effective provider, and fallback reason without recording prompt text or
-credentials.
+The selected managed model uses a Chat Completions adapter, which cannot run
+Codex's hosted search tool. Codex may still offer `web_search` on an ordinary
+turn. The router removes that optional tool and keeps the request on the
+selected managed model. It also tells the model that web access is unavailable,
+so it must not claim to have searched. Explicitly selecting search, or requiring
+it when no supported function tools remain, returns
+`hosted_tool_unsupported`. Choose a native Responses model when the task needs
+hosted search.
 
 ### HTTP 401
 

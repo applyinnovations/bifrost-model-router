@@ -373,7 +373,11 @@ func HydrateModel(original map[string]any, resolved config.ResolvedModel, instru
 	setMissing(result, "effective_context_window_percent", p.EffectiveContextWindowPercent)
 	setMissing(result, "experimental_supported_tools", []string{})
 	setMissing(result, "input_modalities", p.InputModalities)
-	setMissing(result, "supports_search_tool", p.SupportsSearch)
+	if resolved.Model.ResponsesMode == config.ResponsesChatPolyfill {
+		result["supports_search_tool"] = false
+	} else {
+		setMissing(result, "supports_search_tool", p.SupportsSearch)
+	}
 	setMissing(result, "supports_experimental_context", false)
 	setMissing(result, "use_responses_lite", false)
 	setMissing(result, "node_repl_auto_review_required", false)

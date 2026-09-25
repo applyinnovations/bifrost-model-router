@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	CurrentVersion                 = 1
-	DefaultHostedToolFallbackModel = "openai/gpt-6-luna"
+	CurrentVersion              = 1
+	DefaultImageGenerationModel = "openai/gpt-6-luna"
 )
 
 type CredentialMode string
@@ -32,13 +32,13 @@ const (
 )
 
 type Config struct {
-	Version                 int                        `json:"version" yaml:"version"`
-	Instructions            string                     `json:"instructions_template,omitempty" yaml:"instructions_template,omitempty"`
-	HostedToolFallbackModel string                     `json:"hosted_tool_fallback_model,omitempty" yaml:"hosted_tool_fallback_model,omitempty"`
-	Providers               map[string]ProviderProfile `json:"providers" yaml:"providers"`
-	Models                  map[string]ModelProfile    `json:"models" yaml:"models"`
-	resolutionIndex         map[string]ResolvedModel
-	resolvedModels          []ResolvedModel
+	Version              int                        `json:"version" yaml:"version"`
+	Instructions         string                     `json:"instructions_template,omitempty" yaml:"instructions_template,omitempty"`
+	ImageGenerationModel string                     `json:"image_generation_model,omitempty" yaml:"image_generation_model,omitempty"`
+	Providers            map[string]ProviderProfile `json:"providers" yaml:"providers"`
+	Models               map[string]ModelProfile    `json:"models" yaml:"models"`
+	resolutionIndex      map[string]ResolvedModel
+	resolvedModels       []ResolvedModel
 }
 
 type ProviderProfile struct {
@@ -46,7 +46,6 @@ type ProviderProfile struct {
 	CredentialMode     CredentialMode    `json:"credential_mode" yaml:"credential_mode"`
 	ResponsesMode      ResponsesMode     `json:"responses_mode" yaml:"responses_mode"`
 	Adapter            string            `json:"adapter,omitempty" yaml:"adapter,omitempty"`
-	NativeHostedTools  map[string]string `json:"native_hosted_tools,omitempty" yaml:"native_hosted_tools,omitempty"`
 	DiscoverModels     bool              `json:"discover_models,omitempty" yaml:"discover_models,omitempty"`
 	ModelNameOverrides map[string]string `json:"model_name_overrides,omitempty" yaml:"model_name_overrides,omitempty"`
 	CodexDefaults      CodexProfile      `json:"codex_defaults,omitempty" yaml:"codex_defaults,omitempty"`
@@ -242,24 +241,20 @@ func (c *Config) ApplyDefaultsAndValidate() error {
 		c.Models[slug] = model
 	}
 	c.buildResolutionIndex()
-	if c.HostedToolFallbackModel == "" {
-		if fallback, ok := c.ResolveModel(DefaultHostedToolFallbackModel); ok &&
-			fallback.Slug == DefaultHostedToolFallbackModel &&
-			fallback.Provider.CredentialMode == CredentialRequestPassthrough &&
-			fallback.Model.ResponsesMode == ResponsesNative {
-			c.HostedToolFallbackModel = DefaultHostedToolFallbackModel
+	if c.ImageGenerationModel == "" {
+		if imageModel, ok := c.ResolveModel(DefaultImageGenerationModel); ok && imageModel.Slug == DefaultImageGenerationModel {
+			c.ImageGenerationModel = DefaultImageGenerationModel
 		}
 	}
-
-	if c.HostedToolFallbackModel != "" {
-		fallback, ok := c.ResolveModel(c.HostedToolFallbackModel)
+	if c.ImageGenerationModel != "" {
+		imageModel, ok := c.ResolveModel(c.ImageGenerationModel)
 		if !ok {
-			return fmt.Errorf("hosted_tool_fallback_model %q is not present in the router catalog", c.HostedToolFallbackModel)
+			return fmt.Errorf("image_generation_model %q is not present in the router catalog", c.ImageGenerationModel)
 		}
-		if fallback.Provider.CredentialMode != CredentialRequestPassthrough || fallback.Model.ResponsesMode != ResponsesNative {
-			return fmt.Errorf("hosted_tool_fallback_model %q must use native Responses with request_passthrough credentials", c.HostedToolFallbackModel)
+		if imageModel.Provider.CredentialMode != CredentialRequestPassthrough || imageModel.Model.ResponsesMode != ResponsesNative {
+			return fmt.Errorf("image_generation_model %q must use native Responses with request_passthrough credentials", c.ImageGenerationModel)
 		}
-		c.HostedToolFallbackModel = fallback.Slug
+		c.ImageGenerationModel = imageModel.Slug
 	}
 	return nil
 }
@@ -282,11 +277,6 @@ func validateProvider(name string, p ProviderProfile) error {
 	}
 	if !validAdapter(p.Adapter) {
 		return fmt.Errorf("provider %q has unknown adapter %q", name, p.Adapter)
-	}
-	for offeredType, upstreamType := range p.NativeHostedTools {
-		if strings.TrimSpace(offeredType) == "" || strings.TrimSpace(upstreamType) == "" {
-			return fmt.Errorf("provider %q native_hosted_tools must map non-empty tool types", name)
-		}
 	}
 	for model, displayName := range p.ModelNameOverrides {
 		if strings.TrimSpace(model) == "" || strings.TrimSpace(displayName) == "" {

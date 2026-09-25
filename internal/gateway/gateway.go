@@ -78,14 +78,16 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
 		return
 	}
-	requested, err := h.resolveRequestModel(body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
-		return
-	}
-	routed, decision, err := responsescompat.ApplyHostedToolRouting(body, h.cfg)
+	routed, filtering, compatErr, err := responsescompat.FilterUnsupportedHostedTools(body, h.cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+	if compatErr != nil {
+		if filtering != nil {
+			log.Printf("responses_route requested_model=%q effective_provider=%q capability_action=%q", filtering.RequestedModel, filtering.EffectiveProvider, "rejected_required_hosted_tools:"+strings.Join(filtering.RemovedToolTypes, ","))
+		}
+		writeError(w, http.StatusBadRequest, compatErr.Code, compatErr.Message)
 		return
 	}
 	resolved, err := h.resolveRequestModel(routed)
@@ -93,11 +95,12 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
 		return
 	}
-	reason := "none"
-	if decision != nil {
-		reason = decision.Reason
+	action := "none"
+	if filtering != nil {
+		action = "removed_optional_hosted_tools:" + strings.Join(filtering.RemovedToolTypes, ",")
+		w.Header().Set("X-Bifrost-Removed-Tools", strings.Join(filtering.RemovedToolTypes, ","))
 	}
-	log.Printf("responses_route requested_model=%q effective_provider=%q fallback_reason=%q", requested.Slug, resolved.Model.Provider, reason)
+	log.Printf("responses_route requested_model=%q effective_provider=%q capability_action=%q", resolved.Slug, resolved.Model.Provider, action)
 	if resolved.Provider.CredentialMode == config.CredentialRequestPassthrough {
 		routed, err = rewriteModel(routed, resolved.UpstreamModel)
 		if err != nil {

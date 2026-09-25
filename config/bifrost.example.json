@@ -26,7 +26,7 @@
     "config": {
       "version": 1,
       "instructions_template": "You are a coding agent.",
-      "hosted_tool_fallback_model": "openai/gpt-5.6-luna",
+      "image_generation_model": "openai/gpt-5.6-luna",
       "providers": {
         "openai": { "credential_mode": "request_passthrough", "responses_mode": "native", "discover_models": true },
         "managed": { "credential_mode": "bifrost", "responses_mode": "chat_polyfill", "adapter": "single-system-message", "discover_models": true, "codex_defaults": { "context_window": 131072, "input_modalities": ["text"] } }

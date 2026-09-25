@@ -32,7 +32,7 @@ models:
 	}
 }
 
-func TestHostedToolFallbackDefaultsToDiscoverableOpenAILuna(t *testing.T) {
+func TestImageGenerationModelDefaultsToDiscoverableOpenAILuna(t *testing.T) {
 	cfg, err := Decode(strings.NewReader(`
 version: 1
 providers:
@@ -44,50 +44,15 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HostedToolFallbackModel != DefaultHostedToolFallbackModel {
-		t.Fatalf("fallback = %q", cfg.HostedToolFallbackModel)
+	if cfg.ImageGenerationModel != DefaultImageGenerationModel {
+		t.Fatalf("image generation model = %q", cfg.ImageGenerationModel)
 	}
 }
 
-func TestProviderNativeHostedToolsSupportCustomProviders(t *testing.T) {
+func TestExplicitImageGenerationModelTakesPrecedence(t *testing.T) {
 	cfg, err := Decode(strings.NewReader(`
 version: 1
-providers:
-  custom-responses:
-    credential_mode: bifrost
-    responses_mode: chat_polyfill
-    native_hosted_tools: {web_search: web_search}
-models:
-  custom-responses/search-model: {codex: {}}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.Providers["custom-responses"].NativeHostedTools["web_search"]; got != "web_search" {
-		t.Fatalf("native hosted tool mapping = %q", got)
-	}
-}
-
-func TestProviderNativeHostedToolsRejectBlankMappings(t *testing.T) {
-	_, err := Decode(strings.NewReader(`
-version: 1
-providers:
-  custom:
-    credential_mode: bifrost
-    responses_mode: chat_polyfill
-    native_hosted_tools: {web_search: " "}
-models:
-  custom/model: {codex: {}}
-`))
-	if err == nil || !strings.Contains(err.Error(), "native_hosted_tools") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestExplicitHostedToolFallbackTakesPrecedence(t *testing.T) {
-	cfg, err := Decode(strings.NewReader(`
-version: 1
-hosted_tool_fallback_model: openai/gpt-5.6-sol
+image_generation_model: openai/gpt-5.6-sol
 providers:
   openai: {credential_mode: request_passthrough, responses_mode: native, discover_models: true}
   managed: {credential_mode: bifrost, responses_mode: chat_polyfill, discover_models: true}
@@ -97,12 +62,12 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HostedToolFallbackModel != "openai/gpt-5.6-sol" {
-		t.Fatalf("fallback = %q", cfg.HostedToolFallbackModel)
+	if cfg.ImageGenerationModel != "openai/gpt-5.6-sol" {
+		t.Fatalf("image generation model = %q", cfg.ImageGenerationModel)
 	}
 }
 
-func TestHostedToolFallbackDoesNotInventStaticModel(t *testing.T) {
+func TestImageGenerationModelDoesNotInventStaticModel(t *testing.T) {
 	cfg, err := Decode(strings.NewReader(`
 version: 1
 providers:
@@ -114,8 +79,8 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HostedToolFallbackModel != "" {
-		t.Fatalf("unlisted static fallback = %q", cfg.HostedToolFallbackModel)
+	if cfg.ImageGenerationModel != "" {
+		t.Fatalf("unlisted static image model = %q", cfg.ImageGenerationModel)
 	}
 }
 
@@ -361,11 +326,11 @@ func TestProviderDisplayName(t *testing.T) {
 	}
 }
 
-func TestHostedToolFallbackMustBeNativeRequestPassthroughModel(t *testing.T) {
+func TestImageGenerationModelMustBeNativeRequestPassthroughModel(t *testing.T) {
 	t.Run("canonicalizes alias", func(t *testing.T) {
 		cfg, err := Decode(strings.NewReader(`
 version: 1
-hosted_tool_fallback_model: luna
+image_generation_model: luna
 providers:
   openai: {credential_mode: request_passthrough, responses_mode: native}
 models:
@@ -374,22 +339,22 @@ models:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.HostedToolFallbackModel != "openai/luna" {
-			t.Fatalf("fallback model = %q", cfg.HostedToolFallbackModel)
+		if cfg.ImageGenerationModel != "openai/luna" {
+			t.Fatalf("image generation model = %q", cfg.ImageGenerationModel)
 		}
 	})
 
 	t.Run("rejects managed provider", func(t *testing.T) {
 		_, err := Decode(strings.NewReader(`
 version: 1
-hosted_tool_fallback_model: other/chat
+image_generation_model: other/chat
 providers:
   other: {credential_mode: bifrost, responses_mode: chat_polyfill}
 models:
   other/chat: {codex: {}}
 `))
 		if err == nil || !strings.Contains(err.Error(), "native Responses with request_passthrough") {
-			t.Fatalf("expected fallback validation error, got %v", err)
+			t.Fatalf("expected image model validation error, got %v", err)
 		}
 	})
 }

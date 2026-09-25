@@ -6,21 +6,17 @@
 | `chat_polyfill` | Bifrost Responses-to-Chat mux | Bifrost | Text history, function tools/results, ordinary usage and SSE text/tool events supported by pinned Bifrost |
 | `unsupported` | No upstream request | None | Stable `responses_unsupported` error |
 
-The initial polyfill rejects features that cannot be represented safely:
+The polyfill rejects features that cannot be represented safely:
 
 - `previous_response_id`, Conversations, background mode, and response
   retrieval/cancellation;
-- hosted tools such as web search, file search, computer use, and code
-  interpreter;
 - non-function tool types and image/file/audio content on text-only adapters.
 
-Any provider can declare `native_hosted_tools` mappings. A request whose hosted
-tools all have mappings uses that provider's native Responses API, while normal
-requests continue through its configured polyfill. Mappings can preserve a
-standard type (`web_search: web_search`) or translate it to a provider server
-tool (`web_search: openrouter:web_search`). Renamed tools must be
-parameter-free; nested and unmapped hosted tools keep the whole-request OpenAI
-fallback so their semantics are not silently discarded.
+Optional hosted tools such as web search, file search, computer use, and code
+interpreter are removed before polyfill validation. This lets Codex offer a
+tool globally without making an otherwise compatible model unusable. The
+selected model does not change. Explicitly selecting an unsupported hosted
+tool fails with `hosted_tool_unsupported`.
 
 Adapters are selected by configuration, not provider name. `openai-chat`
 validates the common Chat-compatible subset. `strict-text-only` makes modality

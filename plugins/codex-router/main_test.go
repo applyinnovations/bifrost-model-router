@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,20 +13,16 @@ import (
 func initTestPlugin(t *testing.T) {
 	t.Helper()
 	err := Init(map[string]any{
-		"version":                    1,
-		"hosted_tool_fallback_model": "openai/luna",
+		"version":                1,
+		"image_generation_model": "openai/luna",
 		"providers": map[string]any{
-			"openai":     map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"},
-			"other":      map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
-			"openrouter": map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "native_hosted_tools": map[string]any{"web_search": "openrouter:web_search"}, "discover_models": true},
-			"custom":     map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "native_hosted_tools": map[string]any{"web_search": "web_search"}, "discover_models": true},
+			"openai": map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"},
+			"other":  map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
 		},
 		"models": map[string]any{
-			"openai/a":                             map[string]any{"codex": map[string]any{}},
-			"openai/luna":                          map[string]any{"codex": map[string]any{}},
-			"other/b":                              map[string]any{"codex": map[string]any{}},
-			"openrouter/stealth/space-bunny-alpha": map[string]any{"codex": map[string]any{}},
-			"custom/search-model":                  map[string]any{"codex": map[string]any{}},
+			"openai/a":    map[string]any{"codex": map[string]any{}},
+			"openai/luna": map[string]any{"codex": map[string]any{}},
+			"other/b":     map[string]any{"codex": map[string]any{}},
 		},
 	})
 	if err != nil {
@@ -33,34 +30,7 @@ func initTestPlugin(t *testing.T) {
 	}
 }
 
-func TestPreAuthBridgesOpenRouterWebSearchWithoutOpenAIFallback(t *testing.T) {
-	initTestPlugin(t)
-	req := &schemas.HTTPRequest{Method: "POST", Path: "/v1/responses", Headers: map[string]string{
-		"Authorization": "Bearer openai-canary",
-		"x-bf-vk":       "sk-bf-canary",
-	}, Body: []byte(`{"model":"openrouter/stealth/space-bunny-alpha","input":"hello","tools":[{"type":"web_search"}]}`)}
-	resp, err := HTTPTransportPreAuthHook(nil, req)
-	if err != nil || resp != nil {
-		t.Fatalf("resp=%v err=%v", resp, err)
-	}
-	var envelope struct {
-		Model string `json:"model"`
-		Tools []struct {
-			Type string `json:"type"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(req.Body, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Model != "openrouter/stealth/space-bunny-alpha" || len(envelope.Tools) != 1 || envelope.Tools[0].Type != "openrouter:web_search" {
-		t.Fatalf("request = %#v", envelope)
-	}
-	if _, ok := req.Headers["Authorization"]; ok || req.Headers["x-bf-direct-key"] != "" {
-		t.Fatalf("OpenAI credentials were retained: %#v", req.Headers)
-	}
-}
-
-func TestPreAuthHostedToolFallsBackWithForwardedOpenAIAuth(t *testing.T) {
+func TestPreAuthFiltersOptionalHostedToolAndUsesManagedCredentials(t *testing.T) {
 	initTestPlugin(t)
 	body := []byte(`{"model":"other/b","input":"hello","tools":[{"type":"web_search"}]}`)
 	req := &schemas.HTTPRequest{Method: "POST", Path: "/v1/responses", Headers: map[string]string{
@@ -72,49 +42,30 @@ func TestPreAuthHostedToolFallsBackWithForwardedOpenAIAuth(t *testing.T) {
 		t.Fatalf("resp=%v err=%v", resp, err)
 	}
 	var envelope struct {
-		Model string `json:"model"`
+		Model        string `json:"model"`
+		Instructions string `json:"instructions"`
+		Tools        []any  `json:"tools"`
 	}
 	if err := json.Unmarshal(req.Body, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Model != "openai/luna" {
-		t.Fatalf("model = %q", envelope.Model)
+	if envelope.Model != "other/b" || len(envelope.Tools) != 0 || !strings.Contains(envelope.Instructions, "web_search") {
+		t.Fatalf("request = %#v", envelope)
 	}
-	if req.Headers["Authorization"] != "Bearer openai-canary" || req.Headers["x-bf-direct-key"] != "true" {
-		t.Fatalf("forwarded auth was not selected: %#v", req.Headers)
+	if len(req.Headers) != 1 || req.Headers["x-bf-vk"] == "" {
+		t.Fatalf("managed credentials were not selected: %#v", req.Headers)
 	}
 }
 
-func TestPreAuthHostedToolUsesDefaultFallbackWhenUnset(t *testing.T) {
-	err := Init(map[string]any{
-		"version": 1,
-		"providers": map[string]any{
-			"openai": map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native", "discover_models": true},
-			"other":  map[string]any{"credential_mode": "bifrost", "responses_mode": "chat_polyfill", "discover_models": true},
-		},
-		"models": map[string]any{
-			"openai/gpt-5.6-sol": map[string]any{"codex": map[string]any{}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestPreAuthRejectsExplicitUnsupportedHostedTool(t *testing.T) {
+	initTestPlugin(t)
 	req := &schemas.HTTPRequest{Method: "POST", Path: "/v1/responses", Headers: map[string]string{
 		"Authorization": "Bearer openai-canary",
 		"x-bf-vk":       "sk-bf-canary",
-	}, Body: []byte(`{"model":"other/new-model","input":"hello","tools":[{"type":"web_search"}]}`)}
+	}, Body: []byte(`{"model":"other/b","input":"hello","tools":[{"type":"web_search"}],"tool_choice":{"type":"web_search"}}`)}
 	resp, err := HTTPTransportPreAuthHook(nil, req)
-	if err != nil || resp != nil {
+	if err != nil || resp == nil || resp.StatusCode != 400 || !strings.Contains(string(resp.Body), "hosted_tool_unsupported") {
 		t.Fatalf("resp=%v err=%v", resp, err)
-	}
-	var envelope struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(req.Body, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Model != "openai/gpt-6-luna" || req.Headers["x-bf-direct-key"] != "true" {
-		t.Fatalf("fallback model = %q, direct key = %q", envelope.Model, req.Headers["x-bf-direct-key"])
 	}
 }
 
@@ -207,26 +158,6 @@ func TestPreLLMSelectsPolyfill(t *testing.T) {
 	}
 	if got, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); got != schemas.ChatCompletionRequest {
 		t.Fatalf("change request type = %q", got)
-	}
-}
-
-func TestPreLLMUsesProviderNativeResponsesForConfiguredHostedTool(t *testing.T) {
-	initTestPlugin(t)
-	ctx := schemas.NewBifrostContext(context.Background(), time.Now().Add(time.Minute))
-	defer ctx.Cancel()
-	req := &schemas.BifrostRequest{RequestType: schemas.ResponsesStreamRequest, ResponsesRequest: &schemas.BifrostResponsesRequest{
-		Provider: "custom",
-		Model:    "search-model",
-		Params: &schemas.ResponsesParameters{Tools: []schemas.ResponsesTool{{
-			Type: schemas.ResponsesToolTypeWebSearch,
-		}}},
-	}}
-	_, short, err := PreLLMHook(ctx, req)
-	if err != nil || short != nil {
-		t.Fatalf("short=%v err=%v", short, err)
-	}
-	if changed, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); changed != "" {
-		t.Fatalf("request was converted to %q", changed)
 	}
 }
 

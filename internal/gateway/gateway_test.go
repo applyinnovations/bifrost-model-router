@@ -16,20 +16,16 @@ import (
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Config{
-		Version:                 1,
-		HostedToolFallbackModel: "openai/luna",
+		Version:              1,
+		ImageGenerationModel: "openai/luna",
 		Providers: map[string]config.ProviderProfile{
-			"openai":     {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
-			"managed":    {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
-			"openrouter": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "openrouter:web_search"}, DiscoverModels: true},
-			"custom":     {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, NativeHostedTools: map[string]string{"web_search": "web_search"}, DiscoverModels: true},
+			"openai":  {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
+			"managed": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
 		},
 		Models: map[string]config.ModelProfile{
-			"openai/sol":                           {Aliases: []string{"sol"}, Codex: config.CodexProfile{ContextWindow: 272000, MaxContextWindow: 872000}, ContextVariants: []config.ContextVariant{{ContextWindow: 872000}}},
-			"openai/luna":                          {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
-			"managed/text-model":                   {Aliases: []string{"text-model"}, Codex: config.CodexProfile{}},
-			"openrouter/stealth/space-bunny-alpha": {Codex: config.CodexProfile{}},
-			"custom/search-model":                  {Codex: config.CodexProfile{}},
+			"openai/sol":         {Aliases: []string{"sol"}, Codex: config.CodexProfile{ContextWindow: 272000, MaxContextWindow: 872000}, ContextVariants: []config.ContextVariant{{ContextWindow: 872000}}},
+			"openai/luna":        {Aliases: []string{"luna"}, Codex: config.CodexProfile{}},
+			"managed/text-model": {Aliases: []string{"text-model"}, Codex: config.CodexProfile{}},
 		},
 	}
 	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
@@ -44,18 +40,15 @@ func TestResponsesDispatch(t *testing.T) {
 		body      string
 		wantPath  string
 		wantModel string
-		wantTool  string
+		removed   string
 	}{
 		{"OpenAI native", `{"model":"openai/sol","input":"hi"}`, chatGPTResponsesPath, "sol", ""},
 		{"OpenAI context variant", `{"model":"sol-872k","input":"hi"}`, chatGPTResponsesPath, "sol", ""},
 		{"managed provider", `{"model":"managed/text-model","input":"hi"}`, "/v1/responses", "managed/text-model", ""},
 		{"new managed model", `{"model":"managed/new-model","input":"hi"}`, "/v1/responses", "managed/new-model", ""},
 		{"new OpenAI model", `{"model":"new-openai-model","input":"hi"}`, chatGPTResponsesPath, "new-openai-model", ""},
-		{"hosted tool fallback", `{"model":"managed/text-model","input":"hi","tools":[{"type":"web_search"}]}`, chatGPTResponsesPath, "luna", "web_search"},
-		{"hosted image tool fallback", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, chatGPTResponsesPath, "luna", "image_generation"},
-		{"unsupported hosted tool fallback", `{"model":"openrouter/stealth/space-bunny-alpha","input":"hi","tools":[{"type":"file_search"}]}`, chatGPTResponsesPath, "luna", "file_search"},
-		{"OpenRouter native web search bridge", `{"model":"openrouter/stealth/space-bunny-alpha","input":"what model are you?","tools":[{"type":"web_search"}]}`, "/v1/responses", "openrouter/stealth/space-bunny-alpha", "openrouter:web_search"},
-		{"custom provider native web search", `{"model":"custom/search-model","input":"latest news","tools":[{"type":"web_search","search_context_size":"high"}]}`, "/v1/responses", "custom/search-model", "web_search"},
+		{"optional web search filtered", `{"model":"managed/text-model","input":"hi","tools":[{"type":"web_search"}]}`, "/v1/responses", "managed/text-model", "web_search"},
+		{"optional image tool filtered", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, "/v1/responses", "managed/text-model", "image_generation"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -68,10 +61,9 @@ func TestResponsesDispatch(t *testing.T) {
 				}
 				body, _ := io.ReadAll(req.Body)
 				var envelope struct {
-					Model string `json:"model"`
-					Tools []struct {
-						Type string `json:"type"`
-					} `json:"tools"`
+					Model        string `json:"model"`
+					Instructions string `json:"instructions"`
+					Tools        []any  `json:"tools"`
 				}
 				if err := json.Unmarshal(body, &envelope); err != nil {
 					t.Fatal(err)
@@ -79,8 +71,8 @@ func TestResponsesDispatch(t *testing.T) {
 				if envelope.Model != test.wantModel {
 					t.Errorf("model = %q, want %q", envelope.Model, test.wantModel)
 				}
-				if test.wantTool != "" && (len(envelope.Tools) != 1 || envelope.Tools[0].Type != test.wantTool) {
-					t.Errorf("tools = %#v, want %q", envelope.Tools, test.wantTool)
+				if test.removed != "" && (len(envelope.Tools) != 0 || !strings.Contains(envelope.Instructions, test.removed)) {
+					t.Errorf("unsupported tool was not filtered: %#v", envelope)
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = w.Write([]byte("data: done\n\n"))
@@ -98,56 +90,54 @@ func TestResponsesDispatch(t *testing.T) {
 			if resp.Code != http.StatusOK {
 				t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
 			}
+			if got := resp.Header().Get("X-Bifrost-Removed-Tools"); got != test.removed {
+				t.Fatalf("removed tools header = %q, want %q", got, test.removed)
+			}
 		})
 	}
 }
 
-func TestOpenRouterWebSearchResultAndRoutingLogPassThrough(t *testing.T) {
-	const searchEvent = `data: {"type":"response.output_item.done","item":{"type":"web_search_call","status":"completed"}}` + "\n\n"
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/responses" {
-			t.Errorf("path = %q", req.URL.Path)
-		}
-		body, _ := io.ReadAll(req.Body)
-		if !bytes.Contains(body, []byte(`"model":"openrouter/stealth/space-bunny-alpha"`)) ||
-			!bytes.Contains(body, []byte(`"type":"openrouter:web_search"`)) {
-			t.Errorf("bridged request = %s", body)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(searchEvent))
-	}))
+func TestResponsesRejectsExplicitUnsupportedHostedToolWithoutCallingUpstream(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
 	defer upstream.Close()
 	handler, err := New(testConfig(t), upstream.URL, upstream.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var logs bytes.Buffer
-	previousLogWriter := log.Writer()
-	log.SetOutput(&logs)
-	t.Cleanup(func() { log.SetOutput(previousLogWriter) })
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"openrouter/stealth/space-bunny-alpha","input":"find current news","tools":[{"type":"web_search"}]}`))
-	req.Header.Set("Authorization", "Bearer secret-openai-token")
-	req.Header.Set("x-bf-vk", "secret-virtual-key")
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"managed/text-model","input":"search","tools":[{"type":"web_search"}],"tool_choice":{"type":"web_search"}}`))
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
-	if resp.Code != http.StatusOK || resp.Body.String() != searchEvent {
-		t.Fatalf("status = %d body=%q", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "hosted_tool_unsupported") || upstreamCalls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", resp.Code, upstreamCalls, resp.Body.String())
 	}
+}
+
+func TestResponsesCapabilityLogIsPrivacySafe(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"output":[]}`)) }))
+	defer upstream.Close()
+	handler, err := New(testConfig(t), upstream.URL, upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"managed/text-model","input":"private prompt","tools":[{"type":"web_search"}]}`))
+	req.Header.Set("Authorization", "Bearer private-token")
+	req.Header.Set("x-bf-vk", "private-key")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
 	logText := logs.String()
-	for _, want := range []string{
-		`requested_model="openrouter/stealth/space-bunny-alpha"`,
-		`effective_provider="openrouter"`,
-		`fallback_reason="provider_native_hosted_tool:web_search"`,
-	} {
+	for _, want := range []string{`requested_model="managed/text-model"`, `effective_provider="managed"`, `capability_action="removed_optional_hosted_tools:web_search"`} {
 		if !strings.Contains(logText, want) {
-			t.Errorf("routing log %q does not contain %q", logText, want)
+			t.Errorf("log %q missing %q", logText, want)
 		}
 	}
-	for _, private := range []string{"find current news", "secret-openai-token", "secret-virtual-key"} {
+	for _, private := range []string{"private prompt", "private-token", "private-key"} {
 		if strings.Contains(logText, private) {
-			t.Errorf("routing log contains private value %q: %s", private, logText)
+			t.Errorf("log contains %q: %s", private, logText)
 		}
 	}
 }
