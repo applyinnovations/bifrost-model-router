@@ -8,7 +8,7 @@
   "properties": {
     "version": { "const": 1 },
     "instructions_template": { "type": "string" },
-    "hosted_tool_fallback_model": { "type": "string", "minLength": 1 },
+    "image_generation_model": { "type": "string", "minLength": 1 },
     "providers": { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/provider" } },
     "models": { "type": "object", "minProperties": 1, "propertyNames": { "pattern": "^[^/]+/.+$" }, "additionalProperties": { "$ref": "#/$defs/model" } }
   },

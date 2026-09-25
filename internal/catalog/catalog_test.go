@@ -71,6 +71,28 @@ func TestHydratePreservesUnknownFieldsAndAddsConfiguredModels(t *testing.T) {
 	}
 }
 
+func TestHydrateDisablesSearchForChatPolyfillModels(t *testing.T) {
+	body := []byte(`{"models":[{"slug":"openai/a","supports_search_tool":true},{"slug":"other/b","supports_search_tool":true}]}`)
+	out, err := Hydrate(body, testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]bool{}
+	for _, model := range decoded.Models {
+		value, _ := model["supports_search_tool"].(bool)
+		values[model["slug"].(string)] = value
+	}
+	if !values["openai/a"] || values["other/b"] {
+		t.Fatalf("search capabilities = %#v", values)
+	}
+}
+
 func TestHydrateIsDeterministic(t *testing.T) {
 	cfg := testConfig(t)
 	one, err := Hydrate([]byte(`{"data":[]}`), cfg)

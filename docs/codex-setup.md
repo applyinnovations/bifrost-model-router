@@ -202,12 +202,13 @@ OpenAI credential.
 ### `web_search` is unavailable through a Chat Completions polyfill
 
 The selected managed model uses a Chat Completions adapter, which cannot run
-Codex's hosted search tool. The router defaults missing
-`plugins[].config.hosted_tool_fallback_model` to `openai/gpt-6-luna` when the
-OpenAI request-passthrough provider can resolve it. An explicit value overrides
-the default. Pull the current image and rerun setup to apply this to an existing
-local configuration. The whole search request uses the fallback OpenAI model.
-Restart Codex and create a new task after the router is updated.
+Codex's hosted search tool. Codex may still offer `web_search` on an ordinary
+turn. The router removes that optional tool and keeps the request on the
+selected managed model. It also tells the model that web access is unavailable,
+so it must not claim to have searched. Explicitly selecting search, or requiring
+it when no supported function tools remain, returns
+`hosted_tool_unsupported`. Choose a native Responses model when the task needs
+hosted search.
 
 ### HTTP 401
 

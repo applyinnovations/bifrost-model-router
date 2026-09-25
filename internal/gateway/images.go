@@ -42,8 +42,8 @@ func (h *Handler) serveImageGeneration(w http.ResponseWriter, req *http.Request)
 		writeError(w, http.StatusBadRequest, "unsupported_image_count", "only one image per request is supported")
 		return
 	}
-	if h.cfg.HostedToolFallbackModel == "" {
-		writeError(w, http.StatusServiceUnavailable, "image_fallback_unavailable", "no OpenAI Responses fallback model is configured")
+	if h.cfg.ImageGenerationModel == "" {
+		writeError(w, http.StatusServiceUnavailable, "image_generation_unavailable", "no OpenAI Responses image generation model is configured")
 		return
 	}
 	tool := map[string]any{"type": "image_generation", "model": imageReq.Model, "action": "generate"}
@@ -59,7 +59,7 @@ func (h *Handler) serveImageGeneration(w http.ResponseWriter, req *http.Request)
 		tool["output_compression"] = *imageReq.OutputCompression
 	}
 	responseBody, err := json.Marshal(map[string]any{
-		"model":       h.cfg.HostedToolFallbackModel,
+		"model":       h.cfg.ImageGenerationModel,
 		"input":       []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": imageReq.Prompt}}}},
 		"tools":       []any{tool},
 		"tool_choice": map[string]string{"type": "image_generation"},

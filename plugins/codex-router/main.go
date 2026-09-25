@@ -48,9 +48,12 @@ func HTTPTransportPreAuthHook(_ *schemas.BifrostContext, req *schemas.HTTPReques
 	}
 	cfg := currentConfig()
 	if isResponsesRequest(req) {
-		routedBody, _, err := responsescompat.ApplyHostedToolFallback(req.Body, cfg)
+		routedBody, _, compatErr, err := responsescompat.FilterUnsupportedHostedTools(req.Body, cfg)
 		if err != nil {
 			return errorResponse(400, "invalid_request", "request body must be valid JSON"), nil
+		}
+		if compatErr != nil {
+			return errorResponse(400, compatErr.Code, compatErr.Message), nil
 		}
 		req.Body = routedBody
 	}

@@ -118,7 +118,7 @@ cat >"${app_dir}/config.json" <<JSON
     "config": {
       "version": 1,
       "instructions_template": "You are a coding agent.",
-      "hosted_tool_fallback_model": "openai/native-model",
+      "image_generation_model": "openai/native-model",
       "providers": {
         "openai": { "credential_mode": "request_passthrough", "responses_mode": "native" },
         "mock-chat": {
@@ -185,12 +185,12 @@ discovered_polyfill_json="$(curl --fail-with-body --silent http://127.0.0.1:1808
 	--data '{"model":"mock-chat/chat-new-model","input":"hello"}')"
 jq -e '.object == "response" and .model == "chat-new-model" and .output[0].content[0].text == "polyfill ok"' <<<"${discovered_polyfill_json}" >/dev/null
 
-hosted_fallback_json="$(curl --fail-with-body --silent http://127.0.0.1:18080/v1/responses \
+filtered_hosted_tool_json="$(curl --fail-with-body --silent http://127.0.0.1:18080/v1/responses \
 	-H 'Content-Type: application/json' \
 	-H 'Authorization: Bearer openai-canary' \
 	-H 'x-bf-vk: sk-bf-e2e' \
 	--data '{"model":"mock-chat/chat-model","input":"hello","tools":[{"type":"web_search"}]}')"
-jq -e '.object == "response" and .model == "native-model" and .output[0].content[0].text == "native ok"' <<<"${hosted_fallback_json}" >/dev/null
+jq -e '.object == "response" and .model == "chat-model" and .output[0].content[0].text == "polyfill ok"' <<<"${filtered_hosted_tool_json}" >/dev/null
 
 namespace_polyfill_json="$(curl --fail-with-body --silent http://127.0.0.1:18080/v1/responses \
 	-H 'Content-Type: application/json' \

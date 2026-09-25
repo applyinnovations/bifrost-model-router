@@ -8,10 +8,9 @@ owned by the exact `openai` provider and configured with
 `request_passthrough` may retain `Authorization` and receive
 `x-bf-direct-key: true`.
 
-Hosted-tool fallback rewrites the request model before this credential
-decision. Its target must be a cataloged native Responses model using
-`request_passthrough`, so fallback traffic is subject to the same allowlist and
-forwarded-token checks.
+Hosted-tool capability filtering never rewrites the request model. Managed
+provider traffic therefore cannot acquire OpenAI passthrough credentials merely
+because Codex offered a hosted tool.
 
 On every Bifrost-owned route the plugin removes, using case-insensitive
 matching:

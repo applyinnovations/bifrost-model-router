@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,8 +16,8 @@ import (
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Config{
-		Version:                 1,
-		HostedToolFallbackModel: "openai/luna",
+		Version:              1,
+		ImageGenerationModel: "openai/luna",
 		Providers: map[string]config.ProviderProfile{
 			"openai":  {CredentialMode: config.CredentialRequestPassthrough, ResponsesMode: config.ResponsesNative, DiscoverModels: true},
 			"managed": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill, DiscoverModels: true},
@@ -38,14 +40,15 @@ func TestResponsesDispatch(t *testing.T) {
 		body      string
 		wantPath  string
 		wantModel string
+		removed   string
 	}{
-		{"OpenAI native", `{"model":"openai/sol","input":"hi"}`, chatGPTResponsesPath, "sol"},
-		{"OpenAI context variant", `{"model":"sol-872k","input":"hi"}`, chatGPTResponsesPath, "sol"},
-		{"managed provider", `{"model":"managed/text-model","input":"hi"}`, "/v1/responses", "managed/text-model"},
-		{"new managed model", `{"model":"managed/new-model","input":"hi"}`, "/v1/responses", "managed/new-model"},
-		{"new OpenAI model", `{"model":"new-openai-model","input":"hi"}`, chatGPTResponsesPath, "new-openai-model"},
-		{"hosted tool fallback", `{"model":"managed/text-model","input":"hi","tools":[{"type":"web_search"}]}`, chatGPTResponsesPath, "luna"},
-		{"hosted image tool fallback", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, chatGPTResponsesPath, "luna"},
+		{"OpenAI native", `{"model":"openai/sol","input":"hi"}`, chatGPTResponsesPath, "sol", ""},
+		{"OpenAI context variant", `{"model":"sol-872k","input":"hi"}`, chatGPTResponsesPath, "sol", ""},
+		{"managed provider", `{"model":"managed/text-model","input":"hi"}`, "/v1/responses", "managed/text-model", ""},
+		{"new managed model", `{"model":"managed/new-model","input":"hi"}`, "/v1/responses", "managed/new-model", ""},
+		{"new OpenAI model", `{"model":"new-openai-model","input":"hi"}`, chatGPTResponsesPath, "new-openai-model", ""},
+		{"optional web search filtered", `{"model":"managed/text-model","input":"hi","tools":[{"type":"web_search"}]}`, "/v1/responses", "managed/text-model", "web_search"},
+		{"optional image tool filtered", `{"model":"managed/text-model","input":"draw a mark","tools":[{"type":"image_generation"}]}`, "/v1/responses", "managed/text-model", "image_generation"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -58,13 +61,18 @@ func TestResponsesDispatch(t *testing.T) {
 				}
 				body, _ := io.ReadAll(req.Body)
 				var envelope struct {
-					Model string `json:"model"`
+					Model        string `json:"model"`
+					Instructions string `json:"instructions"`
+					Tools        []any  `json:"tools"`
 				}
 				if err := json.Unmarshal(body, &envelope); err != nil {
 					t.Fatal(err)
 				}
 				if envelope.Model != test.wantModel {
 					t.Errorf("model = %q, want %q", envelope.Model, test.wantModel)
+				}
+				if test.removed != "" && (len(envelope.Tools) != 0 || !strings.Contains(envelope.Instructions, test.removed)) {
+					t.Errorf("unsupported tool was not filtered: %#v", envelope)
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = w.Write([]byte("data: done\n\n"))
@@ -82,7 +90,55 @@ func TestResponsesDispatch(t *testing.T) {
 			if resp.Code != http.StatusOK {
 				t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
 			}
+			if got := resp.Header().Get("X-Bifrost-Removed-Tools"); got != test.removed {
+				t.Fatalf("removed tools header = %q, want %q", got, test.removed)
+			}
 		})
+	}
+}
+
+func TestResponsesRejectsExplicitUnsupportedHostedToolWithoutCallingUpstream(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalls++ }))
+	defer upstream.Close()
+	handler, err := New(testConfig(t), upstream.URL, upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"managed/text-model","input":"search","tools":[{"type":"web_search"}],"tool_choice":{"type":"web_search"}}`))
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "hosted_tool_unsupported") || upstreamCalls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", resp.Code, upstreamCalls, resp.Body.String())
+	}
+}
+
+func TestResponsesCapabilityLogIsPrivacySafe(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"output":[]}`)) }))
+	defer upstream.Close()
+	handler, err := New(testConfig(t), upstream.URL, upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"managed/text-model","input":"private prompt","tools":[{"type":"web_search"}]}`))
+	req.Header.Set("Authorization", "Bearer private-token")
+	req.Header.Set("x-bf-vk", "private-key")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	logText := logs.String()
+	for _, want := range []string{`requested_model="managed/text-model"`, `effective_provider="managed"`, `capability_action="removed_optional_hosted_tools:web_search"`} {
+		if !strings.Contains(logText, want) {
+			t.Errorf("log %q missing %q", logText, want)
+		}
+	}
+	for _, private := range []string{"private prompt", "private-token", "private-key"} {
+		if strings.Contains(logText, private) {
+			t.Errorf("log contains %q: %s", private, logText)
+		}
 	}
 }
 

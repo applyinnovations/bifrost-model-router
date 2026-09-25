@@ -97,13 +97,17 @@ profile uses the Responses wire API and Codex's native OpenAI authentication.
 It also maps the `x-bf-vk` header from `BIFROST_API_KEY`, so every gateway
 request is authorized independently by a Bifrost-managed virtual key.
 
-When omitted, `hosted_tool_fallback_model` defaults to `openai/gpt-6-luna` if
-the OpenAI request-passthrough provider can resolve that native Responses model.
-Set it explicitly to choose a different available native OpenAI model. When a
-Chat Completions-polyfilled model is requested with an OpenAI-hosted/server-side
-tool, the transport rewrites the whole request to the fallback before credential
-selection. The fallback uses the caller's forwarded OpenAI token; the router
-never stores an OpenAI key.
+Chat Completions polyfills cannot execute Responses hosted tools. The router
+removes optional hosted tools, retains ordinary function and namespace tools,
+and keeps the request on its selected model. It rejects an explicit hosted-tool
+choice, and also rejects `tool_choice: required` when filtering leaves no
+supported tools. Filtered requests include a model instruction describing the
+unavailable capability, an `X-Bifrost-Removed-Tools` response header, and a
+privacy-safe routing log.
+
+`image_generation_model` is independent from this filtering. It selects the
+native OpenAI Responses model used only by the explicit
+`/v1/images/generations` compatibility endpoint.
 
 `namespace` is not considered hosted. Bifrost flattens namespace members into
 ordinary function tools for providers without native namespace support and

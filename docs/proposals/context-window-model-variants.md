@@ -275,7 +275,7 @@ For each inference request, structured logs and metrics should distinguish:
 - upstream model;
 - advertised context window;
 - provider and Responses mode;
-- whether the request was rerouted for a hosted tool.
+- whether optional unsupported hosted tools were removed.
 
 Model names are safe operational metadata; credentials and prompt contents
 remain excluded.
@@ -285,7 +285,7 @@ Suggested counters:
 ```text
 router_requests_total{provider,base_model,variant}
 router_unresolved_models_total{requested_model}
-router_hosted_tool_fallback_total{source_model,target_model}
+router_hosted_tool_filter_total{provider,model,tool_type}
 ```
 
 ## Test plan
@@ -327,7 +327,7 @@ router_hosted_tool_fallback_total{source_model,target_model}
   transmitted model.
 - Verify the unsuffixed entry reports the same metadata before and after the
   feature is enabled.
-- Verify hosted tools still reroute to the configured fallback target.
+- Verify optional hosted tools are removed without changing the selected model.
 
 ### Deployment tests
 
