@@ -17,7 +17,7 @@ func filterTestConfig(t *testing.T) config.Config {
 			"managed": {CredentialMode: config.CredentialBifrost, ResponsesMode: config.ResponsesChatPolyfill},
 		},
 		Models: map[string]config.ModelProfile{
-			"openai/native":      {Codex: config.CodexProfile{}},
+			"openai/native":      {Codex: config.CodexProfile{SupportsSearch: true}},
 			"managed/text-model": {Codex: config.CodexProfile{}},
 		},
 	}
@@ -86,6 +86,21 @@ func TestFilterUnsupportedHostedToolsPassesNativeResponsesUnchanged(t *testing.T
 	body := []byte(`{"model":"openai/native","tools":[{"type":"web_search"}]}`)
 	filtered, decision, compatErr, err := FilterUnsupportedHostedTools(body, filterTestConfig(t))
 	if err != nil || compatErr != nil || decision != nil || string(filtered) != string(body) {
+		t.Fatalf("filtered=%s decision=%#v compat=%v err=%v", filtered, decision, compatErr, err)
+	}
+}
+
+func TestFilterUnsupportedHostedToolsFiltersSearchFromNativeModelWithoutCapability(t *testing.T) {
+	cfg := filterTestConfig(t)
+	model := cfg.Models["openai/native"]
+	model.Codex.SupportsSearch = false
+	cfg.Models["openai/native"] = model
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"model":"openai/native","tools":[{"type":"web_search"}]}`)
+	filtered, decision, compatErr, err := FilterUnsupportedHostedTools(body, cfg)
+	if err != nil || compatErr != nil || decision == nil || strings.Contains(string(filtered), `"type":"web_search"`) {
 		t.Fatalf("filtered=%s decision=%#v compat=%v err=%v", filtered, decision, compatErr, err)
 	}
 }

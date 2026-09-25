@@ -13,10 +13,12 @@ The polyfill rejects features that cannot be represented safely:
 - non-function tool types and image/file/audio content on text-only adapters.
 
 Optional hosted tools such as web search, file search, computer use, and code
-interpreter are removed before polyfill validation. This lets Codex offer a
-tool globally without making an otherwise compatible model unusable. The
-selected model does not change. Explicitly selecting an unsupported hosted
-tool fails with `hosted_tool_unsupported`.
+interpreter are removed before polyfill validation. Native Responses models
+also have optional web search removed unless their configured model capability
+advertises search support. This lets Codex offer a tool globally without making
+an otherwise compatible model unusable. The selected model does not change.
+Explicitly selecting an unsupported hosted tool fails with
+`hosted_tool_unsupported`.
 
 Adapters are selected by configuration, not provider name. `openai-chat`
 validates the common Chat-compatible subset. `strict-text-only` makes modality

@@ -105,6 +105,11 @@ supported tools. Filtered requests include a model instruction describing the
 unavailable capability, an `X-Bifrost-Removed-Tools` response header, and a
 privacy-safe routing log.
 
+Native Responses support describes the wire protocol, not every model's tool
+capabilities. A native model receives `web_search` only when its resolved Codex
+profile advertises search support; otherwise the same optional filtering rule
+applies.
+
 `image_generation_model` is independent from this filtering. It selects the
 native OpenAI Responses model used only by the explicit
 `/v1/images/generations` compatibility endpoint.
