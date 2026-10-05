@@ -12,19 +12,21 @@ import (
 	"time"
 )
 
-type imageDiagnosticsContextKey struct{}
+type dispatchDiagnosticsContextKey struct{}
 
-func imageDiagnosticsFor(ctx context.Context) *imageDiagnostics {
-	diag, _ := ctx.Value(imageDiagnosticsContextKey{}).(*imageDiagnostics)
+func dispatchDiagnosticsFor(ctx context.Context) *dispatchDiagnostics {
+	diag, _ := ctx.Value(dispatchDiagnosticsContextKey{}).(*dispatchDiagnostics)
 	return diag
 }
 
-// Image diagnostics deliberately exclude bodies, prompts, filenames, headers,
+// Dispatch diagnostics deliberately exclude bodies, prompts, filenames, headers,
 // URL credentials and query strings. response_hop identifies only the immediate
 // peer we observed; a Server header cannot prove which deeper hop emitted it.
-type imageDiagnostics struct {
+type dispatchDiagnostics struct {
 	RequestID         string `json:"request_id"`
 	Timestamp         string `json:"timestamp"`
+	RequestMethod     string `json:"request_method"`
+	RequestPath       string `json:"request_path"`
 	Operation         string `json:"operation"`
 	Stage             string `json:"stage"`
 	RequestedModel    string `json:"requested_model,omitempty"`
@@ -33,7 +35,7 @@ type imageDiagnostics struct {
 	Provider          string `json:"provider,omitempty"`
 	Capability        string `json:"capability"`
 	Backend           string `json:"backend,omitempty"`
-	ReferenceImages   int    `json:"reference_images"`
+	ReferenceImages   int    `json:"reference_images,omitempty"`
 	UpstreamMethod    string `json:"upstream_method,omitempty"`
 	UpstreamURL       string `json:"upstream_url,omitempty"`
 	ResponseHop       string `json:"response_hop,omitempty"`
@@ -44,41 +46,54 @@ type imageDiagnostics struct {
 	ErrorCode         string `json:"error_code,omitempty"`
 }
 
-func newImageDiagnostics(edit bool) *imageDiagnostics {
+func newImageDiagnostics(edit bool) *dispatchDiagnostics {
 	operation, capability := "generate", "image_generation"
 	if edit {
 		operation, capability = "edit", "image_edit"
 	}
-	return &imageDiagnostics{
+	return &dispatchDiagnostics{
 		RequestID: rand.Text(), Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Operation: operation, Capability: capability, Stage: "authentication",
 	}
 }
 
-func (d *imageDiagnostics) writeError(w http.ResponseWriter, status int, code, message string) {
-	d.Status, d.ErrorCode = status, code
+func (d *dispatchDiagnostics) writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-		"type": "router_error", "code": code, "message": message, "diagnostics": d,
-	}})
+	_, _ = w.Write(d.errorBody(status, code, message))
 }
 
-func (d *imageDiagnostics) log() {
+func (d *dispatchDiagnostics) errorBody(status int, code, message string) []byte {
+	d.Status, d.ErrorCode = status, code
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{
+		"type": "router_error", "code": code, "message": message, "diagnostics": d,
+	}})
+	return append(body, '\n')
+}
+
+func (d *dispatchDiagnostics) log() {
 	encoded, _ := json.Marshal(d)
-	log.Printf("images_route %s", encoded)
+	event := "images_route"
+	if d.Operation == "responses" {
+		event = "responses_dispatch"
+	}
+	log.Printf("%s %s", event, encoded)
 }
 
 func imageUpstreamURL(base *url.URL) string {
-	target := *base
-	target.Path = strings.TrimSuffix(target.Path, "/") + chatGPTResponsesPath
-	if target.RawPath != "" {
-		target.RawPath = strings.TrimSuffix(target.RawPath, "/") + chatGPTResponsesPath
-	}
-	return imageURLForDiagnostics(&target)
+	return upstreamURLForDiagnostics(base, chatGPTResponsesPath)
 }
 
-func imageURLForDiagnostics(upstream *url.URL) string {
+func upstreamURLForDiagnostics(base *url.URL, path string) string {
+	target := *base
+	target.Path = strings.TrimSuffix(target.Path, "/") + path
+	if target.RawPath != "" {
+		target.RawPath = strings.TrimSuffix(target.RawPath, "/") + path
+	}
+	return dispatchURLForDiagnostics(&target)
+}
+
+func dispatchURLForDiagnostics(upstream *url.URL) string {
 	target := *upstream
 	target.User, target.RawQuery, target.Fragment, target.RawFragment = nil, "", "", ""
 	target.ForceQuery = false
@@ -86,7 +101,7 @@ func imageURLForDiagnostics(upstream *url.URL) string {
 }
 
 // Upstream identifiers are opaque metadata, not arbitrary header contents.
-func safeImageMetadata(value string) string {
+func safeDispatchMetadata(value string) string {
 	if len(value) > 128 {
 		return ""
 	}

@@ -147,6 +147,34 @@ func TestPreAuthRoutesChatGPTPassthroughCredentials(t *testing.T) {
 	}
 }
 
+func TestPreAuthPreservesSolNativeReferenceRequest(t *testing.T) {
+	err := Init(map[string]any{
+		"version": 1, "image_generation_model": "openai/luna",
+		"providers": map[string]any{"openai": map[string]any{"credential_mode": "request_passthrough", "responses_mode": "native"}},
+		"models": map[string]any{
+			"openai/gpt-5.6-sol": map[string]any{"codex": map[string]any{}},
+			"openai/luna":        map[string]any{"codex": map[string]any{}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"role":"user","content":[{"type":"input_text","text":"Create six wordmark treatments"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=","detail":"original"}]}],"tools":[{"type":"image_generation","model":"gpt-image-2","action":"auto"}],"tool_choice":{"type":"image_generation"},"stream":true,"future_native_field":{"preserve":true}}`)
+	for _, path := range []string{"/v1/responses", "/chatgpt_passthrough/backend-api/codex/responses"} {
+		req := &schemas.HTTPRequest{
+			Method: "POST", Path: path, Body: append([]byte(nil), body...),
+			Headers: map[string]string{"Authorization": "Bearer openai-canary", "x-bf-vk": "sk-bf-canary", "ChatGPT-Account-ID": "account-canary"},
+		}
+		resp, err := HTTPTransportPreAuthHook(nil, req)
+		if err != nil || resp != nil || string(req.Body) != string(body) {
+			t.Fatalf("native reference request was rejected, filtered or switched to the image bridge on %s", path)
+		}
+		if req.Headers["Authorization"] != "Bearer openai-canary" || req.Headers["x-bf-vk"] != "sk-bf-canary" || req.Headers["ChatGPT-Account-ID"] != "account-canary" || req.Headers["x-bf-direct-key"] != "true" {
+			t.Error("native reference passthrough lost request-scoped auth")
+		}
+	}
+}
+
 func TestPreLLMSelectsPolyfill(t *testing.T) {
 	initTestPlugin(t)
 	ctx := schemas.NewBifrostContext(context.Background(), time.Now().Add(time.Minute))

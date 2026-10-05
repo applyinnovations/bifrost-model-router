@@ -63,8 +63,10 @@ func (h *Handler) serveImageEdit(w http.ResponseWriter, req *http.Request) {
 
 func (h *Handler) serveImages(w http.ResponseWriter, req *http.Request, edit bool) {
 	diag := newImageDiagnostics(edit)
+	diag.RequestMethod, diag.RequestPath = req.Method, req.URL.Path
 	defer diag.log()
 	w.Header().Set("X-Request-ID", diag.RequestID)
+	w.Header().Set("X-Bifrost-Request-ID", diag.RequestID)
 	w.Header().Set("Cache-Control", "no-store")
 	if req.Header.Get("x-bf-vk") == "" {
 		diag.writeError(w, http.StatusUnauthorized, "missing_bifrost_auth", "a Bifrost virtual key is required")
@@ -163,7 +165,7 @@ func (h *Handler) serveImages(w http.ResponseWriter, req *http.Request, edit boo
 		diag.writeError(w, http.StatusInternalServerError, "image_request_failed", "could not construct image request")
 		return
 	}
-	forward := req.Clone(context.WithValue(req.Context(), imageDiagnosticsContextKey{}, diag))
+	forward := req.Clone(context.WithValue(req.Context(), dispatchDiagnosticsContextKey{}, diag))
 	forward.URL.Path, forward.URL.RawPath, forward.URL.RawQuery = "/v1/responses", "", ""
 	forward.Body = io.NopCloser(bytes.NewReader(responseBody))
 	forward.ContentLength = int64(len(responseBody))
@@ -203,7 +205,7 @@ func (h *Handler) serveImages(w http.ResponseWriter, req *http.Request, edit boo
 	_ = json.NewEncoder(w).Encode(map[string]any{"created": time.Now().Unix(), "data": []any{data}})
 }
 
-func parseImageRequest(req *http.Request, edit bool, diag *imageDiagnostics) (imageRequest, error) {
+func parseImageRequest(req *http.Request, edit bool, diag *dispatchDiagnostics) (imageRequest, error) {
 	var result imageRequest
 	mediaType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
 	if err != nil && req.Header.Get("Content-Type") != "" {

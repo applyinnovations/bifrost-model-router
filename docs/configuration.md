@@ -132,6 +132,15 @@ unsupported errors. Unknown fields and invalid uploads are rejected before
 dispatch so a reference cannot be silently discarded. A missing compatible
 backend returns `image_operation_unsupported` with HTTP 503.
 
+An incoming native OpenAI `/v1/responses` request follows the existing
+Responses passthrough instead. Its selected model, reference-image inputs,
+image tool options and unknown native fields are retained, apart from resolving
+the router model slug to its upstream model ID and applying the declared
+hosted-tool capability policy. An image input does not select the Images bridge
+or `image_generation_model`. Native Responses therefore do not depend on that
+bridge model being configured. Successful JSON/SSE bodies and native JSON errors
+pass through unchanged.
+
 `namespace` is not considered hosted. Bifrost flattens namespace members into
 ordinary function tools for providers without native namespace support and
 restores namespaced calls in the returned Responses payload.

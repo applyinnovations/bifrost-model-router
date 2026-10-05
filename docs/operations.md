@@ -61,17 +61,24 @@ uninstall` or `router profile rollback BACKUP`.
   authenticated upstream lists it. For providers without model discovery,
   declare the model explicitly in router config.
 
-### Image requests
+### Images and Responses requests
 
-Every Images generation or edit request receives a generated `X-Request-ID`.
-The gateway forwards that ID to Bifrost and emits an `images_route` JSON log
-record. On failure, the same record appears under `error.diagnostics` in the
-JSON response, alongside a stable error code. It contains the UTC incident
-timestamp, operation, requested image-tool model, selected Responses model,
-provider, capability classification, reference count, failing stage, upstream
-method and URL, and observed HTTP status. The upstream URL omits credentials
-and query parameters. Upstream request IDs and Server metadata are included
-when present and safe to record.
+Every Images or `/v1/responses` request receives a generated
+`X-Bifrost-Request-ID`. The gateway forwards that ID to Bifrost in `X-Request-ID`
+and emits an `images_route` or `responses_dispatch` JSON log record. Native
+Responses retain the upstream's `X-Request-ID`; the Images bridge uses its
+generated ID for that response header too.
+
+Router errors and normalized upstream HTML failures include the same record
+under `error.diagnostics`, alongside a stable error code. It contains the UTC
+incident timestamp, incoming method/path, operation, requested and selected
+models, provider, capability classification, failing stage, upstream method
+and URL, and observed HTTP status. Images bridge records also include reference
+counts when present. The incoming path distinguishes a native `/v1/responses`
+request from `/v1/images/edits` without inspecting or logging image content.
+The upstream URL omits credentials and query parameters. Upstream request IDs
+and Server metadata are included when present and safe to record. Successful
+native JSON/SSE bodies and native JSON error bodies are preserved.
 
 - `image_operation_unsupported` at `backend_selection`: configure a compatible
   `image_generation_model`; no upstream call occurred.
@@ -85,6 +92,11 @@ when present and safe to record.
   JSON diagnostics.
 - `image_generation_failed` at `response_decode`: the upstream returned HTTP
   200, but its Responses stream yielded no image.
+- `responses_upstream_error` at `upstream_http`: the native Responses path
+  received an HTML error. Its HTTP status is retained and its raw body is
+  replaced with diagnostic JSON.
+- `upstream_unavailable` at `upstream_transport` on `/v1/responses`: the native
+  Responses dispatcher could not receive an upstream HTTP response.
 
 `response_hop: "bifrost"` identifies the gateway's immediate peer. A reported
 `upstream_server: "nginx/1.27.5"` alone cannot identify a deeper service that
@@ -97,3 +109,12 @@ Run `go test ./internal/gateway -run 'TestImages|TestImage'` for the controlled
 regression: the same prompt with and without a generated, valid 1206 × 2622 PNG,
 endpoint and payload checks, unsupported backends, and simulated upstream HTTP
 and transport failures. These tests use a mock backend and consume no quota.
+
+Run `go test ./internal/gateway -run 'TestOpenAISolResponses|TestResponses'` to
+check the native path with the same prompt and generated PNG, including JSON
+and SSE response preservation, retention of Sol and image-tool options even
+without a bridge model, and native HTML/JSON/transport error handling. The
+plugin tests also check that Bifrost's pre-auth hook preserves the native image
+request and its Codex authentication. These checks establish route behavior;
+they do not identify the original incident's endpoint or prove live account
+image-generation availability.

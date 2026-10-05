@@ -89,12 +89,12 @@ func writeImageSSE(w http.ResponseWriter, encoded string) {
 	_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"result\":\""+encoded+"\"}]}}\n\n")
 }
 
-func imageErrorDiagnostics(t *testing.T, resp *httptest.ResponseRecorder, code string) imageDiagnostics {
+func dispatchErrorDiagnostics(t *testing.T, resp *httptest.ResponseRecorder, code string) dispatchDiagnostics {
 	t.Helper()
 	var result struct {
 		Error struct {
-			Code        string           `json:"code"`
-			Diagnostics imageDiagnostics `json:"diagnostics"`
+			Code        string              `json:"code"`
+			Diagnostics dispatchDiagnostics `json:"diagnostics"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &result); err != nil {
@@ -104,7 +104,7 @@ func imageErrorDiagnostics(t *testing.T, resp *httptest.ResponseRecorder, code s
 		t.Fatalf("error code = %q, want %q", result.Error.Code, code)
 	}
 	diag := result.Error.Diagnostics
-	if diag.RequestID == "" || diag.RequestID != resp.Header().Get("X-Request-ID") || diag.Status != resp.Code || diag.ErrorCode != code {
+	if diag.RequestID == "" || diag.RequestID != resp.Header().Get("X-Bifrost-Request-ID") || diag.Status != resp.Code || diag.ErrorCode != code {
 		t.Fatalf("inconsistent diagnostics: %+v", diag)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, diag.Timestamp); err != nil {
@@ -260,7 +260,7 @@ func TestImagesRejectUnavailableBackend(t *testing.T) {
 				if resp.Code != http.StatusServiceUnavailable {
 					t.Fatalf("status = %d", resp.Code)
 				}
-				diag := imageErrorDiagnostics(t, resp, "image_operation_unsupported")
+				diag := dispatchErrorDiagnostics(t, resp, "image_operation_unsupported")
 				if diag.Stage != "backend_selection" || diag.UpstreamURL != "" || diag.UpstreamStatus != 0 {
 					t.Errorf("unsupported operation claimed upstream dispatch: %+v", diag)
 				}
@@ -312,7 +312,7 @@ func TestImagesRejectInvalidOrUnsupportedReferences(t *testing.T) {
 			if resp.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d", resp.Code)
 			}
-			imageErrorDiagnostics(t, resp, tc.code)
+			dispatchErrorDiagnostics(t, resp, tc.code)
 		})
 	}
 	if calls.Load() != 0 {
@@ -357,7 +357,7 @@ func TestImageFailureDiagnosticsAndPrivacy(t *testing.T) {
 	if resp.Code != http.StatusNotFound || resp.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("upstream HTML error not normalized: status=%d", resp.Code)
 	}
-	diag := imageErrorDiagnostics(t, resp, "image_upstream_error")
+	diag := dispatchErrorDiagnostics(t, resp, "image_upstream_error")
 	if diag.RequestID != receivedID || diag.Stage != "upstream_http" || diag.RequestedModel != "gpt-image-2" || diag.SelectedModel != "openai/luna" || diag.UpstreamModel != "luna" || diag.Provider != "openai" || diag.Capability != "image_edit" || diag.Backend != "native_responses_image_tool" || diag.ReferenceImages != 1 || diag.UpstreamMethod != http.MethodPost || diag.UpstreamURL != upstream.URL+"/prefix"+chatGPTResponsesPath || diag.ResponseHop != "bifrost" || diag.UpstreamStatus != 404 || diag.UpstreamRequestID != "upstream-incident-id" || diag.UpstreamServer != "nginx/1.27.5" {
 		t.Fatalf("incomplete failure diagnostics: %+v", diag)
 	}
@@ -381,7 +381,7 @@ func TestImageTransportFailureDoesNotClaimUpstreamResponse(t *testing.T) {
 	})
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, imageJSONRequest(t, "/v1/images/generations", map[string]any{"model": "gpt-image-2", "prompt": imageRegressionPrompt}))
-	diag := imageErrorDiagnostics(t, resp, "image_upstream_unavailable")
+	diag := dispatchErrorDiagnostics(t, resp, "image_upstream_unavailable")
 	if resp.Code != http.StatusBadGateway || diag.Stage != "upstream_transport" || diag.ResponseHop != "" || diag.UpstreamStatus != 0 || diag.UpstreamURL != "http://127.0.0.1:1/prefix"+chatGPTResponsesPath {
 		t.Fatalf("transport failure attributed to a response: %+v", diag)
 	}
@@ -402,7 +402,7 @@ func TestImageNoResultDiagnostics(t *testing.T) {
 	}
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, imageJSONRequest(t, "/v1/images/generations", map[string]any{"model": "gpt-image-2", "prompt": imageRegressionPrompt}))
-	diag := imageErrorDiagnostics(t, resp, "image_generation_failed")
+	diag := dispatchErrorDiagnostics(t, resp, "image_generation_failed")
 	if resp.Code != http.StatusBadGateway || diag.Stage != "response_decode" || diag.UpstreamStatus != 200 || diag.ResponseHop != "bifrost" || strings.Contains(resp.Body.String(), "private-response-error") {
 		t.Fatalf("invalid response diagnostics: %+v", diag)
 	}
