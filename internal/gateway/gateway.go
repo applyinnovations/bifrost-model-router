@@ -45,8 +45,25 @@ func New(cfg config.Config, bifrostURL, chatGPTURL string) (*Handler, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(bifrost)
 	proxy.FlushInterval = -1
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, proxyErr error) {
+		if diag := imageDiagnosticsFor(req.Context()); diag != nil {
+			diag.Stage = "upstream_transport"
+			diag.UpstreamURL = imageURLForDiagnostics(req.URL)
+			writeError(w, http.StatusBadGateway, "image_upstream_unavailable", "could not reach the image backend")
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", proxyErr.Error())
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if diag := imageDiagnosticsFor(resp.Request.Context()); diag != nil {
+			diag.UpstreamMethod = resp.Request.Method
+			diag.UpstreamURL = imageURLForDiagnostics(resp.Request.URL)
+			diag.UpstreamStatus = resp.StatusCode
+			diag.ResponseHop = "bifrost"
+			diag.UpstreamRequestID = safeImageMetadata(resp.Header.Get("X-Request-ID"))
+			diag.UpstreamServer = safeImageMetadata(resp.Header.Get("Server"))
+		}
+		return nil
 	}
 	return &Handler{
 		cfg:             cfg,
@@ -65,6 +82,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.serveResponses(w, req)
 	case req.Method == http.MethodPost && req.URL.Path == "/v1/images/generations":
 		h.serveImageGeneration(w, req)
+	case req.Method == http.MethodPost && req.URL.Path == "/v1/images/edits":
+		h.serveImageEdit(w, req)
 	case req.Method == http.MethodGet && req.URL.Path == "/v1/models" && req.URL.Query().Get("client_version") != "":
 		h.serveModels(w, req)
 	default:

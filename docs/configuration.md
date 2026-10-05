@@ -111,8 +111,26 @@ profile advertises search support; otherwise the same optional filtering rule
 applies.
 
 `image_generation_model` is independent from this filtering. It selects the
-native OpenAI Responses model used only by the explicit
-`/v1/images/generations` compatibility endpoint.
+native OpenAI Responses model used by the explicit `/v1/images/generations`
+and `/v1/images/edits` compatibility endpoints. Both operations dispatch through
+Bifrost's ChatGPT Responses passthrough with the caller's Codex authentication
+and virtual key. The Images request's `model` selects the image tool model;
+`image_generation_model` selects the Responses model that invokes that tool.
+
+Edits accept multipart uploads named `image` or repeated `image[]`, or JSON
+`images` entries containing `image_url`. Uploaded PNG, JPEG and WebP bytes are
+encoded as Responses `input_image` data URLs in input order, with tool action
+`edit`. Text-only generation uses action `generate`. The gateway reads the HTTP
+upload rather than opening a client-side reference path in the container.
+This follows the [official OpenAI image-generation contract](https://developers.openai.com/api/docs/guides/image-generation).
+
+The bridge returns one complete base64 image in JSON. It accepts up to sixteen
+references, at most 14 MiB per uploaded/data-URL image and 64 MiB per request.
+HTTPS image URLs are passed to the backend without being fetched locally.
+Files API IDs, masks, partial-image streaming and URL output return explicit
+unsupported errors. Unknown fields and invalid uploads are rejected before
+dispatch so a reference cannot be silently discarded. A missing compatible
+backend returns `image_operation_unsupported` with HTTP 503.
 
 `namespace` is not considered hosted. Bifrost flattens namespace members into
 ordinary function tools for providers without native namespace support and
