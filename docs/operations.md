@@ -26,6 +26,23 @@ The service listens on `127.0.0.1:8080` by default. Expose it remotely only
 behind an authenticated, TLS-terminating boundary. The module copies the
 declarative Bifrost config into its systemd-managed state directory on restart.
 
+## Dispatch memory
+
+The dispatch gateway buffers Responses request bodies for capability filtering
+and model resolution. Known-length bodies are preallocated once; model
+rewriting copies the body once and preserves other native fields verbatim.
+Responses bodies, including chunked uploads, are limited to 100 MiB, matching
+the xlab ingress limit. Oversized bodies receive HTTP 413 with
+`request_too_large`. Images uploads retain their separate 64 MiB limit.
+
+Size the dispatch container for concurrent request bodies and the Images
+bridge, which still buffers the upstream image stream. Set `GOMEMLIMIT` below
+the container limit; xlab uses `384MiB` with a `512Mi` limit and `128Mi` request.
+The Go target is soft, does not include every container allocation, and cannot
+bound live memory under arbitrary concurrency. The `responses_route` log's
+`request_bytes` reports only body size, never request content. Use it with
+container memory and restart metrics to assess future workload sizing.
+
 ## Health and verification
 
 - `GET /health` verifies that the HTTP host is accepting requests.

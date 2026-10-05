@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/buger/jsonparser"
+
 	"github.com/applyinnovations/bifrost-model-router/internal/catalog"
 	"github.com/applyinnovations/bifrost-model-router/internal/config"
 	"github.com/applyinnovations/bifrost-model-router/internal/editorial"
@@ -23,6 +25,11 @@ import (
 )
 
 const chatGPTResponsesPath = "/chatgpt_passthrough/backend-api/codex/responses"
+
+// Match the deployment's 100 MiB ingress limit, including for chunked uploads
+// and direct gateway clients. Image edits may expand their 64 MiB upload when
+// converted to a Responses request containing base64 references.
+const maxResponsesRequestBytes = 100 << 20
 
 // Handler dispatches Codex wire requests without translating native OpenAI
 // traffic. Bifrost's dedicated ChatGPT passthrough owns the raw OpenAI path;
@@ -126,8 +133,13 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("X-Bifrost-Request-ID", diag.RequestID)
 		defer diag.log()
 	}
-	body, err := io.ReadAll(req.Body)
+	body, err := readRequestBody(w, req, maxResponsesRequestBytes)
 	if err != nil {
+		var limitErr *http.MaxBytesError
+		if errors.As(err, &limitErr) {
+			diag.writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "Responses request exceeds the 100 MiB limit")
+			return
+		}
 		diag.writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
 		return
 	}
@@ -167,7 +179,7 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 		action = "removed_optional_hosted_tools:" + strings.Join(filtering.RemovedToolTypes, ",")
 		w.Header().Set("X-Bifrost-Removed-Tools", strings.Join(filtering.RemovedToolTypes, ","))
 	}
-	log.Printf("responses_route requested_model=%q effective_provider=%q capability_action=%q", resolved.Slug, resolved.Model.Provider, action)
+	log.Printf("responses_route requested_model=%q effective_provider=%q capability_action=%q request_bytes=%d", resolved.Slug, resolved.Model.Provider, action, len(body))
 	if resolved.Provider.CredentialMode == config.CredentialRequestPassthrough {
 		routed, err = rewriteModel(routed, resolved.UpstreamModel)
 		if err != nil {
@@ -199,17 +211,70 @@ func (h *Handler) resolveRequestModel(body []byte) (config.ResolvedModel, string
 	return resolved, envelope.Model, nil
 }
 
+// Preallocate known-length bodies once instead of retaining io.ReadAll's
+// successive growing buffers. MaxBytesReader still enforces the limit when
+// Content-Length is absent or incorrect.
+func readRequestBody(w http.ResponseWriter, req *http.Request, limit int64) ([]byte, error) {
+	if req.ContentLength > limit {
+		return nil, &http.MaxBytesError{Limit: limit}
+	}
+	var body bytes.Buffer
+	if req.ContentLength > 0 {
+		body.Grow(int(req.ContentLength) + bytes.MinRead)
+	}
+	_, err := body.ReadFrom(http.MaxBytesReader(w, req.Body, limit))
+	return body.Bytes(), err
+}
+
 func rewriteModel(body []byte, model string) ([]byte, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return nil, err
+	if !json.Valid(body) {
+		return nil, errors.New("request body must be valid JSON")
 	}
 	encoded, err := json.Marshal(model)
 	if err != nil {
 		return nil, err
 	}
-	fields["model"] = encoded
-	return json.Marshal(fields)
+	// Iterate zero-copy views of top-level fields. Re-marshalling a map of
+	// RawMessages duplicates input_image/base64 and other large native fields.
+	// Preserve every byte except model values, including unknown fields and
+	// numeric precision. Replace every duplicate model key so all downstream
+	// parsers see the same resolved model, including escaped key spellings.
+	var rewritten []byte
+	copied := 0
+	canonicalModel := false
+	err = jsonparser.ObjectEach(body, func(key, value []byte, kind jsonparser.ValueType, end int) error {
+		if !strings.EqualFold(string(key), "model") {
+			return nil
+		}
+		canonicalModel = canonicalModel || string(key) == "model"
+		start := end - len(value)
+		if kind == jsonparser.String {
+			start -= 2 // ObjectEach excludes the string's surrounding quotes.
+		}
+		if rewritten == nil {
+			rewritten = make([]byte, 0, len(body)+2*len(encoded)+len(`,"model":`))
+		}
+		rewritten = append(rewritten, body[copied:start]...)
+		rewritten = append(rewritten, encoded...)
+		copied = end
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rewritten == nil {
+		return nil, errors.New("request body must contain a model")
+	}
+	if !canonicalModel {
+		// encoding/json accepts case-insensitive struct fields. Retain that
+		// behavior but provide the canonical key required by upstream parsers.
+		closing := bytes.LastIndexByte(body, '}')
+		rewritten = append(rewritten, body[copied:closing]...)
+		rewritten = append(rewritten, `,"model":`...)
+		rewritten = append(rewritten, encoded...)
+		copied = closing
+	}
+	return append(rewritten, body[copied:]...), nil
 }
 
 func (h *Handler) proxyBifrost(w http.ResponseWriter, req *http.Request, path string, body []byte) {
