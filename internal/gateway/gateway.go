@@ -2,11 +2,14 @@ package gateway
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -45,8 +48,45 @@ func New(cfg config.Config, bifrostURL, chatGPTURL string) (*Handler, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(bifrost)
 	proxy.FlushInterval = -1
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, proxyErr error) {
+		if diag := dispatchDiagnosticsFor(req.Context()); diag != nil {
+			diag.Stage = "upstream_transport"
+			diag.UpstreamURL = dispatchURLForDiagnostics(req.URL)
+			code, message := "image_upstream_unavailable", "could not reach the image backend"
+			if diag.Operation == "responses" {
+				code, message = "upstream_unavailable", "could not reach the Responses backend"
+			}
+			diag.writeError(w, http.StatusBadGateway, code, message)
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", proxyErr.Error())
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if diag := dispatchDiagnosticsFor(resp.Request.Context()); diag != nil {
+			diag.UpstreamMethod = resp.Request.Method
+			diag.UpstreamURL = dispatchURLForDiagnostics(resp.Request.URL)
+			diag.UpstreamStatus = resp.StatusCode
+			diag.ResponseHop = "bifrost"
+			diag.UpstreamRequestID = safeDispatchMetadata(resp.Header.Get("X-Request-ID"))
+			diag.UpstreamServer = safeDispatchMetadata(resp.Header.Get("Server"))
+			diag.Status = resp.StatusCode
+			resp.Header.Set("X-Bifrost-Request-ID", diag.RequestID)
+			mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+			if diag.Operation == "responses" && resp.StatusCode >= 400 && mediaType == "text/html" {
+				// Preserve native JSON errors and successful JSON/SSE verbatim.
+				// An HTML failure is not a Responses payload; attach safe route
+				// details without exposing the upstream body.
+				_ = resp.Body.Close()
+				body := diag.errorBody(resp.StatusCode, "responses_upstream_error", fmt.Sprintf("the Responses backend returned HTTP %d", resp.StatusCode))
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				resp.ContentLength = int64(len(body))
+				resp.Header.Set("Content-Type", "application/json")
+				resp.Header.Set("Cache-Control", "no-store")
+				resp.Header.Del("Content-Length")
+				resp.Header.Del("Content-Encoding")
+			}
+		}
+		return nil
 	}
 	return &Handler{
 		cfg:             cfg,
@@ -65,6 +105,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.serveResponses(w, req)
 	case req.Method == http.MethodPost && req.URL.Path == "/v1/images/generations":
 		h.serveImageGeneration(w, req)
+	case req.Method == http.MethodPost && req.URL.Path == "/v1/images/edits":
+		h.serveImageEdit(w, req)
 	case req.Method == http.MethodGet && req.URL.Path == "/v1/models" && req.URL.Query().Get("client_version") != "":
 		h.serveModels(w, req)
 	default:
@@ -73,27 +115,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
+	diag := dispatchDiagnosticsFor(req.Context())
+	if diag == nil {
+		diag = &dispatchDiagnostics{
+			RequestID: rand.Text(), Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+			RequestMethod: req.Method, RequestPath: req.URL.Path,
+			Operation: "responses", Capability: "responses", Stage: "request_parse",
+		}
+		req = req.Clone(context.WithValue(req.Context(), dispatchDiagnosticsContextKey{}, diag))
+		w.Header().Set("X-Bifrost-Request-ID", diag.RequestID)
+		defer diag.log()
+	}
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
+		diag.writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
 		return
 	}
 	routed, filtering, compatErr, err := responsescompat.FilterUnsupportedHostedTools(body, h.cfg)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		diag.writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
 		return
 	}
 	if compatErr != nil {
 		if filtering != nil {
+			if diag.Operation == "responses" {
+				diag.Stage = "capability_validation"
+				diag.RequestedModel, diag.Provider = filtering.RequestedModel, filtering.EffectiveProvider
+			}
 			log.Printf("responses_route requested_model=%q effective_provider=%q capability_action=%q", filtering.RequestedModel, filtering.EffectiveProvider, "rejected_required_hosted_tools:"+strings.Join(filtering.RemovedToolTypes, ","))
 		}
-		writeError(w, http.StatusBadRequest, compatErr.Code, compatErr.Message)
+		diag.writeError(w, http.StatusBadRequest, compatErr.Code, compatErr.Message)
 		return
 	}
-	resolved, err := h.resolveRequestModel(routed)
+	resolved, requestedModel, err := h.resolveRequestModel(routed)
+	if diag.Operation == "responses" {
+		diag.Stage, diag.RequestedModel = "model_resolution", requestedModel
+	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
+		diag.writeError(w, http.StatusBadRequest, "unresolved_model", err.Error())
 		return
+	}
+	if diag.Operation == "responses" {
+		diag.SelectedModel, diag.UpstreamModel, diag.Provider = resolved.Slug, resolved.UpstreamModel, resolved.Model.Provider
+		diag.Capability, diag.Backend = string(resolved.Model.ResponsesMode), "bifrost_responses"
+		if resolved.Provider.CredentialMode == config.CredentialRequestPassthrough {
+			diag.Backend = "native_responses_passthrough"
+		}
 	}
 	action := "none"
 	if filtering != nil {
@@ -104,7 +171,7 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 	if resolved.Provider.CredentialMode == config.CredentialRequestPassthrough {
 		routed, err = rewriteModel(routed, resolved.UpstreamModel)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+			diag.writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
 			return
 		}
 		h.proxyBifrost(w, req, chatGPTResponsesPath, routed)
@@ -112,24 +179,24 @@ func (h *Handler) serveResponses(w http.ResponseWriter, req *http.Request) {
 	}
 	routed, err = rewriteModel(routed, resolved.Model.Provider+"/"+resolved.UpstreamModel)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		diag.writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
 		return
 	}
 	h.proxyBifrost(w, req, "/v1/responses", routed)
 }
 
-func (h *Handler) resolveRequestModel(body []byte) (config.ResolvedModel, error) {
+func (h *Handler) resolveRequestModel(body []byte) (config.ResolvedModel, string, error) {
 	var envelope struct {
 		Model string `json:"model"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return config.ResolvedModel{}, err
+		return config.ResolvedModel{}, "", err
 	}
 	resolved, ok := h.cfg.ResolveModel(envelope.Model)
 	if !ok {
-		return config.ResolvedModel{}, fmt.Errorf("model %q is not present in the router catalog", envelope.Model)
+		return config.ResolvedModel{}, envelope.Model, fmt.Errorf("model %q is not present in the router catalog", envelope.Model)
 	}
-	return resolved, nil
+	return resolved, envelope.Model, nil
 }
 
 func rewriteModel(body []byte, model string) ([]byte, error) {
@@ -155,7 +222,15 @@ func (h *Handler) proxyBifrost(w http.ResponseWriter, req *http.Request, path st
 		cloned.GetBody = nil
 		cloned.Header.Del("Content-Length")
 	}
+	if diag := dispatchDiagnosticsFor(req.Context()); diag != nil {
+		diag.Stage = "upstream_http"
+		diag.UpstreamMethod, diag.UpstreamURL = req.Method, upstreamURLForDiagnostics(h.bifrostURL, path)
+		cloned.Header.Set("X-Request-ID", diag.RequestID)
+	}
 	h.bifrostProxy.ServeHTTP(w, cloned)
+	if diag := dispatchDiagnosticsFor(req.Context()); diag != nil && diag.Operation == "responses" && diag.UpstreamStatus >= 200 && diag.UpstreamStatus < 300 {
+		diag.Stage = "complete"
+	}
 }
 
 func (h *Handler) serveModels(w http.ResponseWriter, req *http.Request) {

@@ -43,12 +43,17 @@ the agent-managed flow, verification, troubleshooting, and cleanup.
 - `chat_polyfill` models use Bifrost's Responses-to-Chat translation.
 - OpenAI requests use the caller's Codex authentication; other providers use
   credentials managed by Bifrost.
-- Hosted tools on polyfilled models reroute the whole request to an OpenAI
-  Responses model. The fallback defaults to `openai/gpt-6-luna` when available
-  through the configured OpenAI passthrough; it can be overridden.
-- The Codex Images API generation path uses that native OpenAI Responses model
-  and its hosted `image_generation` tool. The gateway adapts the result to the
-  Images API response shape, so Codex login auth works without an API key.
+- Optional unsupported hosted tools are filtered while retaining the selected
+  model. Explicitly requiring an unsupported hosted tool returns an error.
+- The Codex Images API generation and reference-image edit paths use the
+  configured `image_generation_model` and its hosted `image_generation` tool.
+  Uploaded references become Responses image inputs. The gateway adapts the
+  result to the Images API response shape, so Codex login auth works without an
+  API key. Image failures include privacy-safe route diagnostics.
+- Native OpenAI `/v1/responses` requests, including reference-image inputs,
+  stay on their selected model and pass through to Codex Responses. They do not
+  use the Images bridge or its configured model. Native JSON/SSE responses are
+  preserved; HTML errors receive privacy-safe route diagnostics.
 - Account-aware provider catalogs are discovered dynamically. New upstream
   models flow through without editing a static router model list. An optional
   virtual-key allowlist can deliberately limit what a user sees: `"*"` admits
