@@ -45,6 +45,8 @@ spec:
             limits:
               cpu: "8"
               memory: 12Gi
+    - pipelineTaskName: publish-cache
+      serviceAccountName: nix-cache-publisher
   timeouts:
     pipeline: 180m0s
   params:
@@ -177,6 +179,21 @@ spec:
               "ghcr.io/applyinnovations/bifrost-model-router:sha-$(tasks.clone.results.COMMIT_SHA)"
               "ghcr.io/applyinnovations/bifrost-model-router:main"
 
+    # Push and scheduled runs publish this run's store to the shared Nix cache.
+    finally:
+      - name: publish-cache
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: nix-cache-publish
+            - name: namespace
+              value: tekton-pipelines
+        workspaces:
+          - name: nix-store
+            workspace: nix-store
   workspaces:
     - name: source
       volumeClaimTemplate:
@@ -186,9 +203,17 @@ spec:
           resources:
             requests:
               storage: 20Gi
+    # A private Nix store for this run, shared by its tasks and deleted with the
+    # PipelineRun; tools come from the shared Nix cache.
     - name: nix-store
-      persistentVolumeClaim:
-        claimName: nix-store
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: fast-local
+          resources:
+            requests:
+              storage: 40Gi
     - name: basic-auth
       secret:
         secretName: "{{ git_auth_secret }}"
