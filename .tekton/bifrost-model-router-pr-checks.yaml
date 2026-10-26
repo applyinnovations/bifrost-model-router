@@ -1,0 +1,122 @@
+# Pull requests to main: every flake check, in sandboxed Nix with no
+# credentials. Pushes to main run the same checks in the image pipeline.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: bifrost-model-router-pr-checks-
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/target-namespace: tekton-buildkit
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "10"
+  labels:
+    app.kubernetes.io/part-of: ci
+    tekton.dev/pipeline: bifrost-model-router-pr-checks
+spec:
+  params:
+    - name: revision
+      value: "{{ revision }}"
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      nodeSelector:
+        storage.xlab.now/fast-local: "true"
+  taskRunSpecs:
+    - pipelineTaskName: check
+      podTemplate:
+        hostUsers: false
+      stepSpecs:
+        - name: run
+          computeResources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "8"
+              memory: 12Gi
+  timeouts:
+    pipeline: 90m
+  pipelineSpec:
+    params:
+      - name: revision
+        type: string
+    workspaces:
+      - name: source
+      - name: git-auth
+      - name: nix-store
+    tasks:
+      - name: clone
+        timeout: 10m
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: git-clone-v2
+            - name: namespace
+              value: tekton-pipelines
+        params:
+          - name: url
+            value: https://github.com/applyinnovations/bifrost-model-router.git
+          - name: revision
+            value: $(params.revision)
+          - name: expectedCommitSha
+            value: $(params.revision)
+        workspaces:
+          - name: output
+            workspace: source
+          - name: basic-auth
+            workspace: git-auth
+      - name: check
+        timeout: 75m
+        runAfter:
+          - clone
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: nix-run-v2
+            - name: namespace
+              value: tekton-buildkit
+        params:
+          - name: SCRIPT
+            value: |
+              nix flake metadata --no-write-lock-file >/dev/null
+              nix flake check --no-update-lock-file --print-build-logs --max-jobs 2 --cores 4
+        workspaces:
+          - name: source
+            workspace: source
+          - name: nix-store
+            workspace: nix-store
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: fast-local
+          resources:
+            requests:
+              storage: 4Gi
+    - name: git-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+    # A private Nix store for this run, seeded from the pinned image; tools
+    # come from the shared Nix cache. Deleted with the PipelineRun.
+    - name: nix-store
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: fast-local
+          resources:
+            requests:
+              storage: 40Gi
