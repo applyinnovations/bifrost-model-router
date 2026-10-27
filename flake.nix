@@ -373,16 +373,20 @@
                 ];
               }
               ''
+                for pipeline in ${./.tekton}/*.yaml; do
+                  yq -e '.metadata.annotations."pipelinesascode.tekton.dev/target-namespace" == "tekton-buildkit"' "$pipeline" >/dev/null
+                  # Only the standard v1 Tasks, and no shared Nix store.
+                  yq -e '[(.spec.pipelineSpec.tasks[], (.spec.pipelineSpec.finally // [])[]) | .taskRef.params[] | select(.name == "name") | .value | select(test("-v1$") | not)] | length == 0' "$pipeline" >/dev/null
+                  yq -e '[.spec.workspaces[] | select(.name == "nix-store")] | length == 0' "$pipeline" >/dev/null
+                  # Sandboxed Nix runs only inside a pod user namespace.
+                  for task in $(yq -r '.spec.pipelineSpec.tasks[] | select(.taskRef.params[] | select(.name == "name" and .value == "nix-v1")) | .name' "$pipeline"); do
+                    task="$task" yq -e '.spec.taskRunSpecs[] | select(.pipelineTaskName == strenv(task)) | .podTemplate.hostUsers == false' "$pipeline" >/dev/null
+                  done
+                done
                 pipeline=${./.tekton/bifrost-model-router-images.yaml}
-                yq -e '.metadata.annotations."pipelinesascode.tekton.dev/target-namespace" == "tekton-buildkit"' "$pipeline" >/dev/null
-                yq -e '.spec.taskRunSpecs[] | select(.pipelineTaskName == "publish-ghcr") | .podTemplate.hostUsers == false' "$pipeline" >/dev/null
-                yq -e '.spec.pipelineSpec.tasks[] | select(.name == "publish-ghcr") | .runAfter | select(length == 1) | .[0] == "build-and-push-image"' "$pipeline" >/dev/null
-                yq -e '.spec.pipelineSpec.tasks[] | select(.name == "publish-ghcr") | .taskRef.params[] | select(.name == "name" and .value == "nix-run-github-v2")' "$pipeline" >/dev/null
-                yq -e '.spec.pipelineSpec.tasks[] | select(.name == "publish-ghcr") | .workspaces[] | select(.name == "github-packages-auth" and .workspace == "github-packages-auth")' "$pipeline" >/dev/null
-                yq -e '.spec.workspaces[] | select(.name == "github-packages-auth") | .secret.secretName == "github-packages-credentials"' "$pipeline" >/dev/null
-                publish_script="$(yq -r '.spec.pipelineSpec.tasks[] | select(.name == "publish-ghcr") | .params[] | select(.name == "SCRIPT") | .value' "$pipeline")"
-                printf '%s\n' "$publish_script" | rg -F 'ghcr.io/applyinnovations/bifrost-model-router:sha-$(tasks.clone.results.COMMIT_SHA)' >/dev/null
-                printf '%s\n' "$publish_script" | rg -F 'ghcr.io/applyinnovations/bifrost-model-router:main' >/dev/null
+                ghcr_tags="$(yq -r '.spec.pipelineSpec.tasks[] | select(.name == "publish-ghcr") | .params[] | select(.name == "EXTRA_TAGS") | .value' "$pipeline")"
+                printf '%s\n' "$ghcr_tags" | rg -x -F 'sha-$(tasks.clone.results.COMMIT_SHA)' >/dev/null
+                printf '%s\n' "$ghcr_tags" | rg -x -F 'main' >/dev/null
                 touch $out
               '';
           setup-executor =

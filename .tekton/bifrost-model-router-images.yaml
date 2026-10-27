@@ -1,3 +1,6 @@
+# Pushes to main: every flake check and the image build in one sandboxed Nix
+# pod with no credentials, then credential-only publish Tasks push the OCI
+# archive to the internal registry (Flux deploys `main`) and to GHCR.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -15,33 +18,24 @@ metadata:
     ci/repo: "{{ repo_name }}"
 spec:
   taskRunTemplate:
-    serviceAccountName: tekton-build-sa
+    serviceAccountName: default
     podTemplate:
+      automountServiceAccountToken: false
       nodeSelector:
         storage.xlab.now/fast-local: "true"
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
   taskRunSpecs:
-    - pipelineTaskName: verify
-      stepSpecs:
-        - name: run
-          computeResources:
-            requests:
-              cpu: 500m
-              memory: 2Gi
-            limits:
-              cpu: "8"
-              memory: 12Gi
-    - pipelineTaskName: publish-ghcr
+    - pipelineTaskName: build
       podTemplate:
         hostUsers: false
       stepSpecs:
         - name: run
           computeResources:
             requests:
-              cpu: "2"
-              memory: 4Gi
+              cpu: 500m
+              memory: 2Gi
             limits:
               cpu: "8"
               memory: 12Gi
@@ -54,22 +48,19 @@ spec:
       value: "{{ repo_url }}"
     - name: revision
       value: "{{ revision }}"
-    - name: git_auth_secret
-      value: "{{ git_auth_secret }}"
   pipelineSpec:
     params:
       - name: repo_url
         type: string
       - name: revision
         type: string
-      - name: git_auth_secret
-        type: string
     workspaces:
       - name: source
-      - name: nix-store
       - name: basic-auth
+      - name: artifacts
+      - name: nix-cache-export
       - name: docker-config
-      - name: github-packages-auth
+      - name: ghcr-docker-config
     tasks:
       - name: clone
         taskRef:
@@ -78,7 +69,7 @@ spec:
             - name: kind
               value: task
             - name: name
-              value: git-clone
+              value: git-clone-v1
             - name: namespace
               value: tekton-pipelines
         timeout: 10m
@@ -92,12 +83,12 @@ spec:
             value: "$(params.repo_url)"
           - name: revision
             value: "$(params.revision)"
-          - name: depth
-            value: "1"
-          - name: submodules
-            value: "false"
+          - name: expectedCommitSha
+            value: "$(params.revision)"
 
-      - name: verify
+      # The image is one of the flake checks, so building it after them in the
+      # same pod reuses this pod's store instead of substituting it again.
+      - name: build
         runAfter: ["clone"]
         taskRef:
           resolver: cluster
@@ -105,81 +96,85 @@ spec:
             - name: kind
               value: task
             - name: name
-              value: nix-run
+              value: nix-v1
             - name: namespace
-              value: tekton-pipelines
+              value: tekton-buildkit
         timeout: 75m
         workspaces:
           - name: source
             workspace: source
-          - name: nix-store
-            workspace: nix-store
+          - name: artifacts
+            workspace: artifacts
+          - name: nix-cache-export
+            workspace: nix-cache-export
         params:
           - name: SCRIPT
             value: |
-              nix flake check --print-build-logs --max-jobs 2 --cores 4
+              nix flake check --no-update-lock-file --print-build-logs --max-jobs 2 --cores 4
+          - name: IMAGE
+            value: ".#bifrost-model-router-image"
 
-      - name: build-and-push-image
-        runAfter: ["verify"]
+      # `main` goes last: Flux follows it, after the immutable tags exist.
+      - name: publish-internal
+        runAfter: ["build"]
         taskRef:
           resolver: cluster
           params:
             - name: kind
               value: task
             - name: name
-              value: nix-build-push
+              value: oci-publish-v1
             - name: namespace
               value: tekton-pipelines
-        timeout: 60m
+        timeout: 20m
         workspaces:
-          - name: source
-            workspace: source
-          - name: nix-store
-            workspace: nix-store
+          - name: artifacts
+            workspace: artifacts
           - name: docker-config
             workspace: docker-config
         params:
-          - name: SERVICES
-            value: |
-              bifrost-model-router:.:.#bifrost-model-router-image
-          - name: REGISTRY_PREFIX
-            value: "registry.registry.svc.cluster.local"
+          - name: IMAGE
+            value: registry.xlab.now/bifrost-model-router
           - name: COMMIT_SHA
             value: "$(tasks.clone.results.COMMIT_SHA)"
+          - name: ARCHIVE_SHA256
+            value: "$(tasks.build.results.ARCHIVE_SHA256)"
           - name: EXTRA_TAGS
-            value: "main"
-          - name: TLS_VERIFY
-            value: "false"
+            value: |
+              $(tasks.build.results.NIX_TAG)
+              latest
+              main
 
       - name: publish-ghcr
-        runAfter: ["build-and-push-image"]
+        runAfter: ["build"]
         taskRef:
           resolver: cluster
           params:
             - name: kind
               value: task
             - name: name
-              value: nix-run-github-v2
+              value: oci-publish-v1
             - name: namespace
-              value: tekton-buildkit
+              value: tekton-pipelines
         timeout: 35m
         workspaces:
-          - name: source
-            workspace: source
-          - name: nix-store
-            workspace: nix-store
-          - name: github-packages-auth
-            workspace: github-packages-auth
+          - name: artifacts
+            workspace: artifacts
+          - name: docker-config
+            workspace: ghcr-docker-config
         params:
-          - name: GITHUB_TOKEN_SECRET_NAME
-            value: $(params.git_auth_secret)
-          - name: SCRIPT
-            value: >-
-              nix run .#publish-container --
-              "ghcr.io/applyinnovations/bifrost-model-router:sha-$(tasks.clone.results.COMMIT_SHA)"
-              "ghcr.io/applyinnovations/bifrost-model-router:main"
+          - name: IMAGE
+            value: ghcr.io/applyinnovations/bifrost-model-router
+          - name: COMMIT_SHA
+            value: "$(tasks.clone.results.COMMIT_SHA)"
+          - name: ARCHIVE_SHA256
+            value: "$(tasks.build.results.ARCHIVE_SHA256)"
+          - name: EXTRA_TAGS
+            value: |
+              sha-$(tasks.clone.results.COMMIT_SHA)
+              main
 
-    # Push and scheduled runs publish this run's store to the shared Nix cache.
+    # Push runs publish the store paths the build added to the shared Nix cache.
     finally:
       - name: publish-cache
         taskRef:
@@ -188,12 +183,12 @@ spec:
             - name: kind
               value: task
             - name: name
-              value: nix-cache-publish
+              value: nix-cache-publish-v1
             - name: namespace
               value: tekton-pipelines
         workspaces:
-          - name: nix-store
-            workspace: nix-store
+          - name: nix-cache-export
+            workspace: nix-cache-export
   workspaces:
     - name: source
       volumeClaimTemplate:
@@ -202,24 +197,32 @@ spec:
           storageClassName: fast-local
           resources:
             requests:
-              storage: 20Gi
-    # A private Nix store for this run, shared by its tasks and deleted with the
-    # PipelineRun; tools come from the shared Nix cache.
-    - name: nix-store
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          storageClassName: fast-local
-          resources:
-            requests:
-              storage: 40Gi
+              storage: 4Gi
     - name: basic-auth
       secret:
         secretName: "{{ git_auth_secret }}"
+    # The OCI archive handed from the build to the publish Tasks.
+    - name: artifacts
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: fast-local
+          resources:
+            requests:
+              storage: 4Gi
+    # The store paths the build added, as a file:// cache for publish-cache.
+    - name: nix-cache-export
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          storageClassName: fast-local
+          resources:
+            requests:
+              storage: 10Gi
     - name: docker-config
       secret:
         secretName: registry-credentials
-    - name: github-packages-auth
+    # dockerconfigjson for ghcr.io (write:packages); only publish-ghcr binds it.
+    - name: ghcr-docker-config
       secret:
-        secretName: github-packages-credentials
+        secretName: ghcr-push-credentials
