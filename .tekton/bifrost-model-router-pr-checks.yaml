@@ -48,7 +48,6 @@ spec:
     workspaces:
       - name: source
       - name: git-auth
-      - name: nix-store
     tasks:
       - name: clone
         timeout: 10m
@@ -58,7 +57,7 @@ spec:
             - name: kind
               value: task
             - name: name
-              value: git-clone-v2
+              value: git-clone-v1
             - name: namespace
               value: tekton-pipelines
         params:
@@ -83,7 +82,7 @@ spec:
             - name: kind
               value: task
             - name: name
-              value: nix-run-v2
+              value: nix-v1
             - name: namespace
               value: tekton-buildkit
         params:
@@ -94,8 +93,6 @@ spec:
         workspaces:
           - name: source
             workspace: source
-          - name: nix-store
-            workspace: nix-store
   workspaces:
     - name: source
       volumeClaimTemplate:
@@ -109,14 +106,3 @@ spec:
     - name: git-auth
       secret:
         secretName: "{{ git_auth_secret }}"
-    # A private Nix store for this run, seeded from the pinned image; tools
-    # come from the shared Nix cache. Deleted with the PipelineRun.
-    - name: nix-store
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          storageClassName: fast-local
-          resources:
-            requests:
-              storage: 40Gi
