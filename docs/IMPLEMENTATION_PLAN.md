@@ -352,7 +352,7 @@ Treat known upstream bridge regressions as mandatory regression fixtures, especi
 ├── go.mod
 ├── go.sum
 ├── justfile
-└── .github/workflows/
+└── .tekton/
 ```
 
 ## 6. Delivery phases

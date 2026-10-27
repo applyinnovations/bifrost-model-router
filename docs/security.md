@@ -39,5 +39,7 @@ The Codex profile editor rejects symlinks and special files, writes through a
 same-directory atomic rename, preserves restrictive modes, and creates a
 0600 backup before modifying an existing file.
 
-CI uses only canary keys. Pull-request tests require no live credentials. Live
-provider keys must not be made available to workflows triggered by forks.
+CI runs on the xlab Tekton cluster through Pipelines-as-Code, never on GitHub
+runners. It uses only canary keys. Pull-request tests require no live
+credentials. Live provider keys must not be made available to pipelines
+triggered by forks.
