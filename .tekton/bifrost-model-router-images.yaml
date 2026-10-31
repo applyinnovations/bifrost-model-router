@@ -221,7 +221,7 @@ spec:
               storage: 10Gi
     - name: docker-config
       secret:
-        secretName: registry-credentials
+        secretName: registry-push-bifrost-model-router
     # dockerconfigjson for ghcr.io (write:packages); only publish-ghcr binds it.
     - name: ghcr-docker-config
       secret:
