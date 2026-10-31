@@ -378,6 +378,10 @@
                   # Only the standard v1 Tasks, and no shared Nix store.
                   yq -e '[(.spec.pipelineSpec.tasks[], (.spec.pipelineSpec.finally // [])[]) | .taskRef.params[] | select(.name == "name") | .value | select(test("-v1$") | not)] | length == 0' "$pipeline" >/dev/null
                   yq -e '[.spec.workspaces[] | select(.name == "nix-store")] | length == 0' "$pipeline" >/dev/null
+                  # Pull request and comment runs never publish to the shared Nix cache.
+                  if yq -e '.metadata.annotations."pipelinesascode.tekton.dev/on-event" | test("pull_request|comment")' "$pipeline" >/dev/null 2>&1; then
+                    yq -e '[(.spec.pipelineSpec.finally // [])[] | select(.name == "publish-cache") | select((.when // []) | any_c(.input == "{{ event_type }}" and .operator == "in" and (.values | sort | join(",")) == "incoming,push") | not)] | length == 0' "$pipeline" >/dev/null
+                  fi
                   # Sandboxed Nix runs only inside a pod user namespace.
                   for task in $(yq -r '.spec.pipelineSpec.tasks[] | select(.taskRef.params[] | select(.name == "name" and .value == "nix-v1")) | .name' "$pipeline"); do
                     task="$task" yq -e '.spec.taskRunSpecs[] | select(.pipelineTaskName == strenv(task)) | .podTemplate.hostUsers == false' "$pipeline" >/dev/null
