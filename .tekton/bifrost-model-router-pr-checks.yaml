@@ -3,7 +3,7 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  name: nix-flake-check
+  generateName: bifrost-model-router-pr-checks-
   annotations:
     pipelinesascode.tekton.dev/on-event: "[pull_request]"
     pipelinesascode.tekton.dev/on-target-branch: "[main]"
