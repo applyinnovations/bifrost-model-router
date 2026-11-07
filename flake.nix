@@ -7,7 +7,7 @@
     bifrost = {
       # Forked upstream to preserve OpenAI-compatible model display names and
       # reasoning-level metadata through Bifrost's model conversion pipeline.
-      url = "github:applyinnovations/bifrost/bc0ff9e2bc56381c668301d35fa0cc378edff4d3";
+      url = "github:applyinnovations/bifrost/e3bde72b8a25f5ccbb066d8ca45bfa78d1f4cb58";
       flake = false;
     };
   };
@@ -44,7 +44,7 @@
             pname = "bifrost-model-router";
             inherit version;
             src = self;
-            vendorHash = "sha256-3eipCyW6HCSEEBBIGUfMbCc64tpYcmgGtNsnr3B6idQ=";
+            vendorHash = "sha256-KdLEwT63LIkR4xVX2tZYip3v4Ea20654aAa+JfMSAM8=";
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.sqlite ];
             go = pkgs.go_1_27;
@@ -84,7 +84,7 @@
             common
             // {
               pname = "codex-model-router-plugin";
-              vendorHash = "sha256-udv/Fk00i7aDjBGzTJ5AKbIyzCHgTr98H1ICBj7fZfQ=";
+              vendorHash = "sha256-il+Fsw3BkrEnWnD/I50Dpmk6RtRQfGUQbdyYxaX7b3U=";
               doCheck = false;
               postPatch = ''
                 cp -R ${bifrost}/core bifrost-core
@@ -110,23 +110,11 @@
             inherit version;
             src = bifrost;
             modRoot = "transports";
-            vendorHash = "sha256-NxAK4ue993Vcn8ISFqQYrZv+49OvoHsNLxZDbRHOPp8=";
+            vendorHash = "sha256-yCqj996wNuZSV9PDKk7rwKJjEb586XTaXBRWpDZ9rdo=";
             subPackages = [ "bifrost-http" ];
             tags = [ "sqlite_static" ];
             postPatch = ''
               cp -R ${bifrostUI} transports/bifrost-http/ui
-              # The codex-router plugin is loaded with plugin.Open, which
-              # rejects any package version that differs from the host. Keep
-              # klauspost/compress in step with this module's go.mod (and past
-              # GO-2026-6865) until the bifrost fork pins it itself.
-              (
-                cd transports
-                go mod edit -require=github.com/klauspost/compress@v1.20.3
-                cat >>go.sum <<'EOF'
-              github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
-              github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
-              EOF
-              )
             '';
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.sqlite ];
