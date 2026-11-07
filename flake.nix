@@ -7,7 +7,7 @@
     bifrost = {
       # Forked upstream to preserve OpenAI-compatible model display names and
       # reasoning-level metadata through Bifrost's model conversion pipeline.
-      url = "github:applyinnovations/bifrost/e3bde72b8a25f5ccbb066d8ca45bfa78d1f4cb58";
+      url = "github:applyinnovations/bifrost/72a8054d5a6883b0621615281a343b276c50c082";
       flake = false;
     };
   };
