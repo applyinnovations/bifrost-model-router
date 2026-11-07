@@ -7,7 +7,7 @@
     bifrost = {
       # Forked upstream to preserve OpenAI-compatible model display names and
       # reasoning-level metadata through Bifrost's model conversion pipeline.
-      url = "github:applyinnovations/bifrost/bc0ff9e2bc56381c668301d35fa0cc378edff4d3";
+      url = "github:applyinnovations/bifrost/72a8054d5a6883b0621615281a343b276c50c082";
       flake = false;
     };
   };
@@ -44,7 +44,7 @@
             pname = "bifrost-model-router";
             inherit version;
             src = self;
-            vendorHash = "sha256-4louYB9FqGkC/FyN6LY/1TtcvGxaZMucvm19lNDRAZI=";
+            vendorHash = "sha256-KdLEwT63LIkR4xVX2tZYip3v4Ea20654aAa+JfMSAM8=";
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.sqlite ];
             go = pkgs.go_1_27;
@@ -84,7 +84,7 @@
             common
             // {
               pname = "codex-model-router-plugin";
-              vendorHash = "sha256-t4CxfKmrKw7pUXX6wEjT3cDTyjMze6UsLr0jrQKaSfY=";
+              vendorHash = "sha256-il+Fsw3BkrEnWnD/I50Dpmk6RtRQfGUQbdyYxaX7b3U=";
               doCheck = false;
               postPatch = ''
                 cp -R ${bifrost}/core bifrost-core
@@ -110,7 +110,7 @@
             inherit version;
             src = bifrost;
             modRoot = "transports";
-            vendorHash = "sha256-rcqc3JCHdXkLdev1qEYPJAPs+I2iBImlT7TY3x4f9EM=";
+            vendorHash = "sha256-yCqj996wNuZSV9PDKk7rwKJjEb586XTaXBRWpDZ9rdo=";
             subPackages = [ "bifrost-http" ];
             tags = [ "sqlite_static" ];
             postPatch = ''
