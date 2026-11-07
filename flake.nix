@@ -44,7 +44,7 @@
             pname = "bifrost-model-router";
             inherit version;
             src = self;
-            vendorHash = "sha256-4louYB9FqGkC/FyN6LY/1TtcvGxaZMucvm19lNDRAZI=";
+            vendorHash = "sha256-3eipCyW6HCSEEBBIGUfMbCc64tpYcmgGtNsnr3B6idQ=";
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.sqlite ];
             go = pkgs.go_1_27;
@@ -84,7 +84,7 @@
             common
             // {
               pname = "codex-model-router-plugin";
-              vendorHash = "sha256-t4CxfKmrKw7pUXX6wEjT3cDTyjMze6UsLr0jrQKaSfY=";
+              vendorHash = "sha256-udv/Fk00i7aDjBGzTJ5AKbIyzCHgTr98H1ICBj7fZfQ=";
               doCheck = false;
               postPatch = ''
                 cp -R ${bifrost}/core bifrost-core
@@ -110,11 +110,23 @@
             inherit version;
             src = bifrost;
             modRoot = "transports";
-            vendorHash = "sha256-rcqc3JCHdXkLdev1qEYPJAPs+I2iBImlT7TY3x4f9EM=";
+            vendorHash = "sha256-NxAK4ue993Vcn8ISFqQYrZv+49OvoHsNLxZDbRHOPp8=";
             subPackages = [ "bifrost-http" ];
             tags = [ "sqlite_static" ];
             postPatch = ''
               cp -R ${bifrostUI} transports/bifrost-http/ui
+              # The codex-router plugin is loaded with plugin.Open, which
+              # rejects any package version that differs from the host. Keep
+              # klauspost/compress in step with this module's go.mod (and past
+              # GO-2026-6865) until the bifrost fork pins it itself.
+              (
+                cd transports
+                go mod edit -require=github.com/klauspost/compress@v1.20.3
+                cat >>go.sum <<'EOF'
+              github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
+              github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
+              EOF
+              )
             '';
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.sqlite ];
