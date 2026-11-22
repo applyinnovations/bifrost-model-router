@@ -21,12 +21,27 @@
     }:
     let
       eachSystem = nixpkgs.lib.genAttrs (import systems);
+      # Go 1.27.4 fixes GO-2026-6859 (net/http), which govulncheck finds
+      # reachable from the router. nixpkgs still ships 1.27.3 (22 Nov 2026);
+      # drop this overlay once its go_1_27 reaches 1.27.4.
+      goOverlay = final: prev: {
+        go_1_27 = prev.go_1_27.overrideAttrs (_: rec {
+          version = "1.27.4";
+          src = final.fetchurl {
+            url = "https://go.dev/dl/go${version}.src.tar.gz";
+            hash = "sha256-c8+4VxrsDAEXdofbhxY9Rqog6XeWcncokaoXZU2aYJk=";
+          };
+        });
+      };
     in
     {
       packages = eachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ goOverlay ];
+          };
           version = "0.1.0-dev";
           bifrostUI = pkgs.buildNpmPackage {
             pname = "bifrost-ui";
@@ -259,7 +274,10 @@
       checks = eachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ goOverlay ];
+          };
         in
         {
           inherit (self.packages.${system}) plugin config-check;
@@ -584,7 +602,10 @@
       devShells = eachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ goOverlay ];
+          };
         in
         {
           default = pkgs.mkShell {
@@ -611,7 +632,10 @@
       formatter = eachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ goOverlay ];
+          };
         in
         pkgs.writeShellApplication {
           name = "bifrost-router-format-nix";
