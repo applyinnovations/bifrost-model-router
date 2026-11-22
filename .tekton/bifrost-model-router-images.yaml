@@ -35,7 +35,8 @@ spec:
           computeResources:
             requests:
               cpu: 500m
-              memory: 2Gi
+              # Measured peak, 14 days to 22 Nov 2026: RSS 2.9 GiB, working set 3.5 GiB.
+              memory: 3Gi
             limits:
               cpu: "8"
               memory: 12Gi
